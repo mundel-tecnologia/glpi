@@ -65,6 +65,10 @@ if (isset($_SESSION['pwdfield']) && isset($_POST[$_SESSION['pwdfield']])) {
 } else {
     $password = '';
 }
+// MUNDEL: trata o login para remover o domínio de email e evitar problemas com servidores que possuem diversos aliases (Coplan, etc)
+if (filter_var($login, FILTER_VALIDATE_EMAIL)) {
+  $login = substr($login, 0, strpos($login, '@'));
+}
 // Manage the selection of the auth source (local, LDAP id, MAIL id)
 if (isset($_POST['auth'])) {
     $login_auth = $_POST['auth'];
