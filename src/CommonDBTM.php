@@ -1470,9 +1470,6 @@ class CommonDBTM extends CommonGLPI
 
         if ($addMessAfterRedirect) {
             $link = $this->getFormURL();
-            if (!isset($link)) {
-                return;
-            }
             if ($this->getName() == NOT_AVAILABLE) {
                //TRANS: %1$s is the itemtype, %2$d is the id of the item
                 $this->fields['name'] = sprintf(
@@ -1912,11 +1909,7 @@ class CommonDBTM extends CommonGLPI
         }
 
         if ($addMessAfterRedirect) {
-            $link = $this->getFormURL();
-            if (!isset($link)) {
-                return;
-            }
-           // Do not display quotes
+            // Do not display quotes
             if (isset($this->fields['name'])) {
                 $this->fields['name'] = stripslashes($this->fields['name']);
             } else {
@@ -2154,10 +2147,6 @@ class CommonDBTM extends CommonGLPI
         }
 
         if ($addMessAfterRedirect) {
-            $link = $this->getFormURL();
-            if (!isset($link)) {
-                return;
-            }
             if (isset($this->input['_no_message_link'])) {
                 $display = $this->getNameID();
             } else {
@@ -2198,10 +2187,6 @@ class CommonDBTM extends CommonGLPI
         }
 
         if ($addMessAfterRedirect) {
-            $link = $this->getFormURL();
-            if (!isset($link)) {
-                return;
-            }
             if (isset($this->input['_no_message_link'])) {
                 $display = $this->getNameID();
             } else {
@@ -2322,10 +2307,6 @@ class CommonDBTM extends CommonGLPI
         }
 
         if ($addMessAfterRedirect) {
-            $link = $this->getFormURL();
-            if (!isset($link)) {
-                return;
-            }
             if (isset($this->input['_no_message_link'])) {
                 $display = $this->getNameID();
             } else {
@@ -2550,13 +2531,13 @@ class CommonDBTM extends CommonGLPI
                                 $items_id_field = reset($items_id_matches);
                             }
                             $or_criteria[] = [
-                                $itemtype_field => $this->getType(),
-                                $items_id_field => $this->getID(),
+                                $tablename . "." . $itemtype_field => $this->getType(),
+                                $tablename . "." . $items_id_field => $this->getID(),
                             ];
                         } else {
                             // Relation based on single foreign key
                             $or_criteria[] = [
-                                $field => $this->getID(),
+                                $tablename . "." . $field => $this->getID(),
                             ];
                         }
                     }
@@ -4485,6 +4466,7 @@ class CommonDBTM extends CommonGLPI
             } else if (isset($this->fields['entities_id'])) {
                 $entities_id = $this->fields['entities_id'];
             } else {
+                $entities_id = 0;
                 $message = 'Missing entity ID!';
                 trigger_error($message, E_USER_WARNING);
             }
@@ -4537,17 +4519,17 @@ class CommonDBTM extends CommonGLPI
                             $where['NOT'] = [$this->getTable() . '.id' => $this->input['id']];
                         }
 
-                        if (countElementsInTable($this->getTable(), $where) > 0) {
+                        $doubles = getAllDataFromTable($this->getTable(), $where);
+                        if (countElementsInTable($doubles) > 0) {
+                            $message = [];
                             if (
                                 $p['unicity_error_message']
                                 || $p['add_event_on_duplicate']
                             ) {
-                                $message = [];
                                 foreach (explode(',', $fields['fields']) as $field) {
                                     $message[$field] = $this->input[$field];
                                 }
 
-                                $doubles      = getAllDataFromTable($this->getTable(), $where);
                                 $message_text = $this->getUnicityErrorMessage($message, $fields, $doubles);
                                 if ($p['unicity_error_message']) {
                                     if (!$fields['action_refuse']) {
@@ -4731,6 +4713,8 @@ class CommonDBTM extends CommonGLPI
             }
         }
 
+        $value = $values;
+
         if (count($searchoptions)) {
             $field = $searchoptions['field'];
 
@@ -4738,7 +4722,6 @@ class CommonDBTM extends CommonGLPI
             if (is_array($values)) {
                 $value = $values[$field];
             } else {
-                $value  = $values;
                 $values = [$field => $value];
             }
 
@@ -4968,13 +4951,15 @@ class CommonDBTM extends CommonGLPI
                 );
             }
         }
+
+        $value  = $values;
+
         if (count($searchoptions)) {
             $field = $searchoptions['field'];
            // Normalize option
             if (is_array($values)) {
                 $value = $values[$field];
             } else {
-                $value  = $values;
                 $values = [$field => $value];
             }
 
@@ -5260,9 +5245,6 @@ class CommonDBTM extends CommonGLPI
             if ($_SESSION["glpiis_ids_visible"] || empty($data["template_name"])) {
                 $templname = sprintf(__('%1$s (%2$s)'), $templname, $data["id"]);
             }
-            if (Session::isMultiEntitiesMode()) {
-                $entity = Dropdown::getDropdownName('glpi_entities', $data['entities_id']);
-            }
             if ($item->canCreate() && !$add) {
                 $modify_params =
                 (strpos($target, '?') ? '&amp;' : '?')
@@ -5274,6 +5256,7 @@ class CommonDBTM extends CommonGLPI
                 echo "<a href=\"$target_modify\">";
                 echo "&nbsp;&nbsp;&nbsp;$templname&nbsp;&nbsp;&nbsp;</a></td>";
                 if (Session::isMultiEntitiesMode()) {
+                    $entity = Dropdown::getDropdownName('glpi_entities', $data['entities_id']);
                     echo "<td class='tab_bg_1 center'>$entity</td>";
                 }
                 echo "<td class='tab_bg_2 center b'>";
@@ -6439,6 +6422,7 @@ class CommonDBTM extends CommonGLPI
         ?array $menus = null,
         array $options = []
     ): void {
+        \Glpi\Debug\Profiler::getInstance()->start(static::class . '::displayFullPageForItem');
         $id = (int) $id;
         $item = new static();
 
@@ -6455,6 +6439,7 @@ class CommonDBTM extends CommonGLPI
             // New item, check create rights
             if (!static::canCreate()) {
                 static::displayAccessDeniedPage($menus, 'Missing CREATE right. Cannot view the new item form.');
+                \Glpi\Debug\Profiler::getInstance()->stop(static::class . '::displayFullPageForItem');
                 return;
             }
 
@@ -6464,11 +6449,13 @@ class CommonDBTM extends CommonGLPI
             // Existing item, try to load it and check read rights
             if (!$item->getFromDB($id)) {
                 static::displayItemNotFoundPage($menus);
+                \Glpi\Debug\Profiler::getInstance()->stop(static::class . '::displayFullPageForItem');
                 return;
             }
 
             if (!$item->can($id, READ)) {
                 static::displayAccessDeniedPage($menus, 'Missing READ right. Cannot view the item.');
+                \Glpi\Debug\Profiler::getInstance()->stop(static::class . '::displayFullPageForItem');
                 return;
             }
 
@@ -6478,7 +6465,9 @@ class CommonDBTM extends CommonGLPI
 
         // Show header
         if ($interface == 'central') {
+            \Glpi\Debug\Profiler::getInstance()->start(static::class . '::displayCentralHeader');
             static::displayCentralHeader($title, $menus);
+            \Glpi\Debug\Profiler::getInstance()->stop(static::class . '::displayCentralHeader');
         } else {
             static::displayHelpdeskHeader($title, $menus);
         }
@@ -6488,7 +6477,9 @@ class CommonDBTM extends CommonGLPI
         }
         // Show item
         $options['loaded'] = true;
+        \Glpi\Debug\Profiler::getInstance()->start(static::class . '::display');
         $item->display($options);
+        \Glpi\Debug\Profiler::getInstance()->stop(static::class . '::display');
 
         // Display extra html if needed
         if (!empty($options['after_display'] ?? "")) {
@@ -6497,6 +6488,7 @@ class CommonDBTM extends CommonGLPI
 
         // Show footer
         if ($interface == 'central') {
+            // No need to stop profiler here. The footer ends every section still running.
             Html::footer();
         } else {
             Html::helpFooter();
@@ -6520,6 +6512,7 @@ class CommonDBTM extends CommonGLPI
             $title = static::getTypeName(1);
         }
 
+        \Glpi\Debug\Profiler::getInstance()->start('Html::header');
         Html::header(
             $title,
             $_SERVER['PHP_SELF'],
@@ -6528,6 +6521,7 @@ class CommonDBTM extends CommonGLPI
             $menus[2] ?? '',
             false
         );
+        \Glpi\Debug\Profiler::getInstance()->stop('Html::header');
     }
 
     /**

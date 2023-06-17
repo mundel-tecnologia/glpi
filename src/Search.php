@@ -4644,6 +4644,8 @@ JAVASCRIPT;
 
         // Special case when searching for an user (need to compare with login, firstname, ...)
         $subquery_specific_username = false;
+        $subquery_specific_username_firstname_real_name = '';
+        $subquery_specific_username_anonymous = '';
 
         // The subquery operator will be "IN" or "NOT IN" depending on the context and criteria
         $subquery_operator = "";
@@ -6686,7 +6688,8 @@ JAVASCRIPT;
                         $added         = [];
                         for ($k = 0; $k < $data[$ID]['count']; $k++) {
                             if (
-                                strlen(trim($data[$ID][$k]['name'])) > 0
+                                isset($data[$ID][$k]['name'])
+                                && strlen(trim($data[$ID][$k]['name'])) > 0
                                 && !in_array(
                                     $data[$ID][$k]['name'] . "-" . $data[$ID][$k]['entities_id'],
                                     $added

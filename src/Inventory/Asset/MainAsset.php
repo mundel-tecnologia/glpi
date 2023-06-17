@@ -193,40 +193,38 @@ abstract class MainAsset extends InventoryAsset
         }
 
         // * Type of the asset
-        if (isset($hardware)) {
-            $types_id = $this->getTypesFieldName();
-            if (
-                property_exists($hardware, 'vmsystem')
-                && $hardware->vmsystem != ''
-                && $hardware->vmsystem != 'Physical'
-            ) {
-                $val->$types_id = $hardware->vmsystem;
-                // HACK FOR BSDJail, remove serial and UUID (because it's of host, not container)
-                if ($hardware->vmsystem == 'BSDJail') {
-                    if (property_exists($val, 'serial')) {
-                        $val->serial = '';
-                    }
-                    $val->uuid .= '-' . $val->name;
+        $types_id = $this->getTypesFieldName();
+        if (
+            property_exists($hardware, 'vmsystem')
+            && $hardware->vmsystem != ''
+            && $hardware->vmsystem != 'Physical'
+        ) {
+            $val->$types_id = $hardware->vmsystem;
+            // HACK FOR BSDJail, remove serial and UUID (because it's of host, not container)
+            if ($hardware->vmsystem == 'BSDJail') {
+                if (property_exists($val, 'serial')) {
+                    $val->serial = '';
                 }
-            } else {
-                if (array_key_exists('bios', $this->extra_data)) {
-                    $bios = (object)$this->extra_data['bios'];
-                    if (
-                        property_exists($hardware, 'chassis_type')
-                        && !empty($hardware->chassis_type)
-                    ) {
-                        $val->$types_id = $hardware->chassis_type;
-                    } else if (
-                        isset($bios) && property_exists($bios, 'type')
-                        && !empty($bios->type)
-                    ) {
-                        $val->$types_id = $bios->type;
-                    } else if (
-                        isset($bios) && property_exists($bios, 'mmodel')
-                        && !empty($bios->mmodel)
-                    ) {
-                        $val->$types_id = $bios->mmodel;
-                    }
+                $val->uuid .= '-' . $val->name;
+            }
+        } else {
+            if (array_key_exists('bios', $this->extra_data)) {
+                $bios = (object)$this->extra_data['bios'];
+                if (
+                    property_exists($hardware, 'chassis_type')
+                    && !empty($hardware->chassis_type)
+                ) {
+                    $val->$types_id = $hardware->chassis_type;
+                } else if (
+                    property_exists($bios, 'type')
+                    && !empty($bios->type)
+                ) {
+                    $val->$types_id = $bios->type;
+                } else if (
+                    property_exists($bios, 'mmodel')
+                    && !empty($bios->mmodel)
+                ) {
+                    $val->$types_id = $bios->mmodel;
                 }
             }
         }
@@ -925,6 +923,11 @@ abstract class MainAsset extends InventoryAsset
             foreach ($assets as $asset) {
                 $asset->setEntityID($this->getEntityID());
                 $asset->setExtraData($this->assets);
+                foreach ($this->assets as $asset_type => $asset_list) {
+                    if ($asset_type != '\\' . get_class($asset)) {
+                        $asset->setExtraData([$asset_type => $asset_list]);
+                    }
+                }
                 $asset->setExtraData(['\\' . get_class($this) => $mainasset]);
                 $asset->handleLinks();
                 $asset->handle();

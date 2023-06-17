@@ -1711,71 +1711,80 @@ class RuleTicket extends DbTestCase
     {
         $this->login();
 
-       // Create rule
-        $ruleticket = new \RuleTicket();
-        $rulecrit   = new \RuleCriteria();
-        $ruleaction = new \RuleAction();
+        // Common variables that will be reused
+        $rule_criteria_category_code = "R";
+        $rule_action_impact_value = 1; // very low
 
-        $ruletid = $ruleticket->add($ruletinput = [
+        // Create rule, rule criteria and rule action
+        $rule = $this->createItem('RuleTicket', [
             'name'         => 'test category code',
             'match'        => 'AND',
             'is_active'    => 1,
             'sub_type'     => 'RuleTicket',
-            'condition'    => \RuleTicket::ONADD,
+            'condition'    => \RuleTicket::ONADD | \RuleTicket::ONUPDATE,
             'is_recursive' => 1,
         ]);
-        $this->checkInput($ruleticket, $ruletid, $ruletinput);
-
-       // Create criteria to check if category code is R
-        $crit_id = $rulecrit->add($crit_input = [
-            'rules_id'  => $ruletid,
+        $this->createItem('RuleCriteria', [
+            'rules_id'  => $rule->getID(),
             'criteria'  => 'itilcategories_id_code',
             'condition' => \Rule::PATTERN_IS,
-            'pattern'   => 'R',
+            'pattern'   => $rule_criteria_category_code,
         ]);
-        $this->checkInput($rulecrit, $crit_id, $crit_input);
-
-       // Create action to put impact to very low
-        $action_id = $ruleaction->add($action_input = [
-            'rules_id'    => $ruletid,
+        $this->createItem('RuleAction', [
+            'rules_id'    => $rule->getID(),
             'action_type' => 'assign',
             'field'       => 'impact',
-            'value'       => 1,
+            'value'       => $rule_action_impact_value,
         ]);
-        $this->checkInput($ruleaction, $action_id, $action_input);
 
-       // Create new group
-        $category = new \ITILCategory();
-        $category_id = $category->add($category_input = [
-            "name" => "group1",
-            "code" => "R"
+        // Create new category
+        $category = $this->createItem('ITILCategory', [
+            "name" => "category_test",
+            "code" => $rule_criteria_category_code,
         ]);
-        $this->checkInput($category, $category_id, $category_input);
 
-       // Check ticket that trigger rule on creation
-        $ticket = new \Ticket();
-        $tickets_id = $ticket->add($ticket_input = [
+        // Check ticket that trigger rule on creation
+        $ticket = $this->createItem('Ticket', [
             'name'              => 'test category code',
             'content'           => 'test category code',
-            'itilcategories_id' => $category_id
+            'itilcategories_id' => $category->getID(),
         ]);
-        $this->checkInput($ticket, $tickets_id, $ticket_input);
+        $tickets_id = $ticket->getID();
 
-       // Check that the rule was executed
+        // Check that the rule was executed
         $this->boolean($ticket->getFromDB($tickets_id))->isTrue();
-        $this->integer($ticket->fields['impact'])->isEqualTo(1);
+        $this->integer($ticket->fields['impact'])->isEqualTo($rule_action_impact_value);
 
-       // Create another ticket that doesn't match the rule
-        $tickets_id = $ticket->add($ticket_input = [
+        // Create another ticket that doesn't match the rule
+        $ticket = $this->createItem('Ticket', [
             'name'              => 'test category code',
             'content'           => 'test category code',
             'itilcategories_id' => 0
         ]);
-        $this->checkInput($ticket, $tickets_id, $ticket_input);
+        $tickets_id = $ticket->getID();
 
-       // Check that the rule was NOT executed
+        // Check that the rule was NOT executed
         $this->boolean($ticket->getFromDB($tickets_id))->isTrue();
-        $this->integer($ticket->fields['impact'])->isNotEqualTo(1);
+        $this->integer($ticket->fields['impact'])->isNotEqualTo($rule_action_impact_value);
+
+        // Update ticket to match the rule
+        $this->updateItem('Ticket', $ticket->getID(), [
+            'itilcategories_id' => $category->getID(),
+        ]);
+
+        // Check that the rule was executed
+        $this->boolean($ticket->getFromDB($tickets_id))->isTrue();
+        $this->integer($ticket->fields['impact'])->isEqualTo($rule_action_impact_value);
+
+        // Change impact, the rule must not be executed again as the category didn't change
+        $this->updateItem('Ticket', $ticket->getID(), [
+            'itilcategories_id' => $category->getID(), // Simulate same category being sent from the user form
+            'impact' => 2,
+        ]);
+
+        // Check that the rule was not executed
+        $this->boolean($ticket->getFromDB($tickets_id))->isTrue();
+        $this->integer($ticket->fields['impact'])->isNotEqualTo($rule_action_impact_value);
     }
 
     /**
@@ -3097,5 +3106,113 @@ class RuleTicket extends DbTestCase
             ITILFollowup::getTable(),
             ['itemtype' => \Ticket::getType(), 'items_id' => $ticket_id]
         ))->isEqualTo(2);
+    }
+
+    public function testSLACriterion()
+    {
+        $this->login('glpi', 'glpi');
+
+        $ruleticket = new \RuleTicket();
+        $rulecrit   = new \RuleCriteria();
+        $ruleaction = new \RuleAction();
+
+        $ruletid = $ruleticket->add($ruletinput = [
+            'name'         => "test rule SLA",
+            'match'        => 'AND',
+            'is_active'    => 1,
+            'sub_type'     => 'RuleTicket',
+            'condition'    => \RuleTicket::ONADD + \RuleTicket::ONUPDATE,
+            'is_recursive' => 1
+        ]);
+        $this->checkInput($ruleticket, $ruletid, $ruletinput);
+
+        $slm = new \SLM();
+        $slm_id = $slm->add(
+            [
+                'name'         => 'Test SLM',
+                'calendars_id' => 0, //24/24 7/7
+            ]
+        );
+        $this->integer($slm_id)->isGreaterThan(0);
+
+        // prepare sla/ola inputs
+        $sla_in = [
+            'slms_id'         => $slm_id,
+            'name'            => "SLA TTR",
+            'comment'         => $this->getUniqueString(),
+            'type'            => \SLM::TTR,
+            'number_time'     => 4,
+            'definition_time' => 'day',
+        ];
+
+        // add SLA (TTR)
+        $sla    = new \SLA();
+        $slas_id_ttr = $sla->add($sla_in);
+        $this->checkInput($sla, $slas_id_ttr, $sla_in);
+
+        $crit_id = $rulecrit->add($crit_input = [
+            'rules_id'  => $ruletid,
+            'criteria'  => 'slas_id_ttr',
+            'condition' => \Rule::PATTERN_IS,
+            'pattern'   => $slas_id_ttr
+        ]);
+        $this->checkInput($rulecrit, $crit_id, $crit_input);
+
+        $crit_id = $rulecrit->add($crit_input = [
+            'rules_id'  => $ruletid,
+            'criteria'  => 'urgency',
+            'condition' => \Rule::PATTERN_IS,
+            'pattern'   => 5
+        ]);
+        $this->checkInput($rulecrit, $crit_id, $crit_input);
+
+        //create new location
+        $location = new \Location();
+        $location_id = $location->add($location_input = [
+            "name" => "location1",
+        ]);
+        $this->checkInput($location, $location_id, $location_input);
+
+        $act_id = $ruleaction->add($act_input = [
+            'rules_id'    => $ruletid,
+            'action_type' => 'assign',
+            'field'       => 'locations_id',
+            'value'       => $location_id
+        ]);
+        $this->checkInput($ruleaction, $act_id, $act_input);
+
+        //create ticket to match rule
+        $ticket = new \Ticket();
+        $ticket_id = $ticket->add($ticket_input = [
+            'name'              => 'test SLA',
+            'content'           => 'test SLA',
+            'slas_id_ttr'       => $slas_id_ttr,
+            'urgency'           => 5
+        ]);
+        $this->checkInput($ticket, $ticket_id, $ticket_input);
+
+        $this->integer($ticket->fields['locations_id'])->isIdenticalTo($location_id);
+
+        //create ticket to not match rule
+        $ticket = new \Ticket();
+        $ticket_id = $ticket->add($ticket_input = [
+            'name'              => 'test SLA',
+            'content'           => 'test SLA',
+            'slas_id_ttr'       => $slas_id_ttr,
+        ]);
+        $this->checkInput($ticket, $ticket_id, $ticket_input);
+
+        $this->integer($ticket->fields['locations_id'])->isIdenticalTo(0);
+
+        //update URGENCY to match rule
+        $this->boolean($ticket->update($ticket_input = [
+            'id'                => $ticket_id,
+            'urgency'           => 5,
+        ]))->isTrue();
+
+        $ticket->getFromDB($ticket_id);
+        $this->checkInput($ticket, $ticket_id, $ticket_input);
+
+        $this->integer($ticket->fields['locations_id'])->isIdenticalTo($location_id);
     }
 }
