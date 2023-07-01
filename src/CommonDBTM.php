@@ -887,7 +887,7 @@ class CommonDBTM extends CommonGLPI
                 foreach ($fields as $field) {
                     if (is_array($field)) {
                         // Relation based on 'itemtype'/'items_id' (polymorphic relationship)
-                        if ($this instanceof IPAddress && in_array('mainitemtype', $field) && in_array('mainitems_id', $field)) {
+                        if ($itemtype instanceof IPAddress && in_array('mainitemtype', $field) && in_array('mainitems_id', $field)) {
                             // glpi_ipaddresses relationship that does not respect naming conventions
                             $itemtype_field = 'mainitemtype';
                             $items_id_field = 'mainitems_id';
@@ -925,12 +925,18 @@ class CommonDBTM extends CommonGLPI
                     );
                     foreach ($result as $data) {
                         $item = new $itemtype();
-                        $item->update(
-                            [
-                                $id_field       => $data[$id_field],
-                                '_disablenotif' => true,
-                            ] + $update
-                        );
+                        $input =  [
+                            $id_field       => $data[$id_field],
+                            '_disablenotif' => true,
+                        ] + $update;
+
+                        //prevent lock if item is dynamic
+                        //as the dictionary rules are played out during the inventory anyway
+                        if (isset($data['is_dynamic'])) {
+                            $input['is_dynamic'] = $data['is_dynamic'];
+                        }
+
+                        $item->update($input);
                     }
                 }
             }
@@ -4520,7 +4526,7 @@ class CommonDBTM extends CommonGLPI
                         }
 
                         $doubles = getAllDataFromTable($this->getTable(), $where);
-                        if (countElementsInTable($doubles) > 0) {
+                        if (count($doubles) > 0) {
                             $message = [];
                             if (
                                 $p['unicity_error_message']

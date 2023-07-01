@@ -234,8 +234,8 @@ abstract class CommonITILObject extends CommonDBTM
                         $actors[] = [
                             'items_id' => $group_obj->fields['id'],
                             'itemtype' => 'Group',
-                            'text'     => $group_obj->getName(),
-                            'title'    => $group_obj->getRawCompleteName(),
+                            'text'     => CommonTreeDropdown::sanitizeSeparatorInCompletename($group_obj->getName()),
+                            'title'    => CommonTreeDropdown::sanitizeSeparatorInCompletename($group_obj->getRawCompleteName()),
                         ];
                     }
                 }
@@ -292,6 +292,12 @@ abstract class CommonITILObject extends CommonDBTM
                                     'title'         => $actor_obj->fields['name'],
                                     'default_email' => $actor_obj->fields['email'],
                                 ];
+                            } elseif ($actor_obj instanceof CommonTreeDropdown) {
+                                // Group
+                                $actors[] = $existing_actor + [
+                                    'text'  => CommonTreeDropdown::sanitizeSeparatorInCompletename($actor_obj->getName()),
+                                    'title' => CommonTreeDropdown::sanitizeSeparatorInCompletename($actor_obj->getRawCompleteName()),
+                                ];
                             } else {
                                 $actors[] = $existing_actor + [
                                     'text'  => $actor_obj->getName(),
@@ -339,8 +345,8 @@ abstract class CommonITILObject extends CommonDBTM
                         'id'       => $group['id'],
                         'items_id' => $group['groups_id'],
                         'itemtype' => 'Group',
-                        'text'     => $group_obj->getName(),
-                        'title'    => $group_obj->getRawCompleteName(),
+                        'text'     => CommonTreeDropdown::sanitizeSeparatorInCompletename($group_obj->getName()),
+                        'title'    => CommonTreeDropdown::sanitizeSeparatorInCompletename($group_obj->getRawCompleteName()),
                     ];
                 }
             }
@@ -622,6 +628,20 @@ abstract class CommonITILObject extends CommonDBTM
                     $this->fields[$key] = $val;
                 }
             }
+        }
+
+        // Recompute priority if not predefined and impact/urgency was changed
+        if (
+            !isset($predefined_fields['priority'])
+            && (
+                isset($predefined_fields['urgency'])
+                || isset($predefined_fields['impact'])
+            )
+        ) {
+            $this->fields['priority'] = self::computePriority(
+                $this->fields['urgency'] ?? 3,
+                $this->fields['impact'] ?? 3
+            );
         }
 
         return $predefined_fields;
@@ -6736,7 +6756,7 @@ abstract class CommonITILObject extends CommonDBTM
 
        //checks rights
         $restrict_fup = $restrict_task = [];
-        if (!$params['expose_private'] && !Session::haveRight("followup", ITILFollowup::SEEPRIVATE)) {
+        if (!$params['expose_private'] || (!Session::haveRight("followup", ITILFollowup::SEEPRIVATE) && !$params['bypass_rights'])) {
             $restrict_fup = [
                 'OR' => [
                     'is_private' => 0,
@@ -6745,7 +6765,7 @@ abstract class CommonITILObject extends CommonDBTM
             ];
         }
 
-        if ($params['is_self_service']) {
+        if ($params['is_self_service'] || !$params['expose_private']) {
             $restrict_fup = [
                 'is_private'   => 0
             ];
@@ -6756,7 +6776,10 @@ abstract class CommonITILObject extends CommonDBTM
 
         $taskClass = $objType . "Task";
         $task_obj  = new $taskClass();
-        if (!$params['expose_private'] && $task_obj->maybePrivate() && !Session::haveRight("task", CommonITILTask::SEEPRIVATE)) {
+        if (
+            $task_obj->maybePrivate()
+            && (!$params['expose_private'] || (!Session::haveRight("followup", CommonITILTask::SEEPRIVATE) && !$params['bypass_rights']))
+        ) {
             $restrict_task = [
                 'OR' => [
                     'is_private'   => 0,
@@ -6767,7 +6790,7 @@ abstract class CommonITILObject extends CommonDBTM
             ];
         }
 
-        if ($params['is_self_service']) {
+        if ($params['is_self_service'] || !$params['expose_private']) {
             $restrict_task = [
                 'is_private'   => 0
             ];
@@ -6776,7 +6799,7 @@ abstract class CommonITILObject extends CommonDBTM
        //add followups to timeline
         $followup_obj = new ITILFollowup();
         if ($followup_obj->canview() || $params['bypass_rights']) {
-            $followups = $followup_obj->find(['items_id'  => $this->getID()] + $restrict_fup, ['date DESC', 'id DESC']);
+            $followups = $followup_obj->find(['items_id'  => $this->getID()] + $restrict_fup, ['date_creation DESC', 'id DESC']);
             foreach ($followups as $followups_id => $followup) {
                 $followup_obj->getFromDB($followups_id);
                 if ($followup_obj->canViewItem() || $params['bypass_rights']) {
@@ -6793,7 +6816,7 @@ abstract class CommonITILObject extends CommonDBTM
 
        //add tasks to timeline
         if ($task_obj->canview() || $params['bypass_rights']) {
-            $tasks = $task_obj->find([$foreignKey => $this->getID()] + $restrict_task, 'date DESC');
+            $tasks = $task_obj->find([$foreignKey => $this->getID()] + $restrict_task, 'date_creation DESC');
             foreach ($tasks as $tasks_id => $task) {
                 $task_obj->getFromDB($tasks_id);
                 if ($task_obj->canViewItem() || $params['bypass_rights']) {
@@ -6826,6 +6849,7 @@ abstract class CommonITILObject extends CommonDBTM
                     'can_edit'           => $objType::canUpdate() && $this->canSolve(),
                     'timeline_position'  => self::TIMELINE_RIGHT,
                     'users_id_editor'    => $solution_item['users_id_editor'],
+                    'date_creation'      => $solution_item['date_creation'],
                     'date_mod'           => $solution_item['date_mod'],
                     'users_id_approval'  => $solution_item['users_id_approval'],
                     'date_approval'      => $solution_item['date_approval'],
@@ -6902,14 +6926,15 @@ abstract class CommonITILObject extends CommonDBTM
                 'timeline_position'  => ['>', self::NO_TIMELINE]
             ]);
             foreach ($document_items as $document_item) {
-                $document_obj->getFromDB($document_item['documents_id']);
-
-                $date = $document_item['date'] ?? $document_item['date_creation'];
+                if (!$document_obj->getFromDB($document_item['documents_id'])) {
+                    // Orphan `Document_Item`
+                    continue;
+                }
 
                 $item = $document_obj->fields;
-                $item['date'] = $date;
+                $item['date'] = $document_item['date'] ?? $document_item['date_creation'];
                 // #1476 - set date_creation, date_mod and owner to attachment ones
-                $item['date_creation'] = $date;
+                $item['date_creation'] = $document_item['date_creation'];
                 $item['date_mod'] = $document_item['date_mod'];
                 $item['users_id'] = $document_item['users_id'];
                 $item['documents_item_id'] = $document_item['id'];
@@ -6981,7 +7006,9 @@ abstract class CommonITILObject extends CommonDBTM
        //sort timeline items by date
         $reverse = $params['sort_by_date_desc'];
         usort($timeline, function ($a, $b) use ($reverse) {
-            $diff = strtotime($a['item']['date']) - strtotime($b['item']['date']);
+            $date_a = $a['item']['date_creation'] ?? $a['item']['date'];
+            $date_b = $b['item']['date_creation'] ?? $b['item']['date'];
+            $diff = strtotime($date_a) - strtotime($date_b);
             return $reverse ? 0 - $diff : $diff;
         });
 
@@ -8646,6 +8673,7 @@ abstract class CommonITILObject extends CommonDBTM
                     $user_link_class::getTableField('users_id'),
                     User::getTableField('firstname'),
                     User::getTableField('realname'),
+                    User::getTableField('name'),
                 ],
                 'FROM'   => $user_link_table,
                 'LEFT JOIN' => [
@@ -8677,7 +8705,7 @@ abstract class CommonITILObject extends CommonDBTM
                     'realname'  => $linked_user_row['realname'],
                     'name'      => formatUserName(
                         $linked_user_row['users_id'],
-                        '',
+                        $linked_user_row['name'],
                         $linked_user_row['realname'],
                         $linked_user_row['firstname']
                     ),
