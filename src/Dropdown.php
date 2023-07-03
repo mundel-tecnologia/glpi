@@ -1920,6 +1920,7 @@ JAVASCRIPT;
             $params['value'] = floor(($params['value']) / $params['step']) * $params['step'];
         }
 
+        // Generate array keys
         $values = [];
 
         if ($params['value']) {
@@ -1944,47 +1945,46 @@ JAVASCRIPT;
             ksort($values);
         }
 
+        // Generate array values
         foreach ($values as $i => $val) {
-            if (empty($val)) {
-                if ($params['inhours']) {
-                    $day  = 0;
-                    $hour = floor($i / HOUR_TIMESTAMP);
-                } else {
-                    $day  = floor($i / DAY_TIMESTAMP);
-                    $hour = floor(($i % DAY_TIMESTAMP) / HOUR_TIMESTAMP);
-                }
-                $minute     = floor(($i % HOUR_TIMESTAMP) / MINUTE_TIMESTAMP);
-                if ($minute === '0') {
-                    $minute = '00';
-                }
-                $values[$i] = '';
-                if ($day > 0) {
-                    if (($hour > 0) || ($minute > 0)) {
-                        if ($minute < 10) {
-                             $minute = '0' . $minute;
-                        }
-
-                       //TRANS: %1$d is the number of days, %2$d the number of hours,
-                       //       %3$s the number of minutes : display 1 day 3h15
-                        $values[$i] = sprintf(
-                            _n('%1$d day %2$dh%3$s', '%1$d days %2$dh%3$s', $day),
-                            $day,
-                            $hour,
-                            $minute
-                        );
-                    } else {
-                        $values[$i] = sprintf(_n('%d day', '%d days', $day), $day);
-                    }
-                } else if ($hour > 0 || $minute > 0) {
+            if ($params['inhours']) {
+                $day  = 0;
+                $hour = floor($i / HOUR_TIMESTAMP);
+            } else {
+                $day  = floor($i / DAY_TIMESTAMP);
+                $hour = floor(($i % DAY_TIMESTAMP) / HOUR_TIMESTAMP);
+            }
+            $minute     = floor(($i % HOUR_TIMESTAMP) / MINUTE_TIMESTAMP);
+            if ($minute === '0') {
+                $minute = '00';
+            }
+            if ($day > 0) {
+                if (($hour > 0) || ($minute > 0)) {
                     if ($minute < 10) {
-                        $minute = '0' . $minute;
+                         $minute = '0' . $minute;
                     }
 
-                   //TRANS: %1$d the number of hours, %2$s the number of minutes : display 3h15
-                    $values[$i] = sprintf(__('%1$dh%2$s'), $hour, $minute);
+                   //TRANS: %1$d is the number of days, %2$d the number of hours,
+                   //       %3$s the number of minutes : display 1 day 3h15
+                    $values[$i] = sprintf(
+                        _n('%1$d day %2$dh%3$s', '%1$d days %2$dh%3$s', $day),
+                        $day,
+                        $hour,
+                        $minute
+                    );
+                } else {
+                    $values[$i] = sprintf(_n('%d day', '%d days', $day), $day);
                 }
+            } else if ($hour > 0 || $minute > 0) {
+                if ($minute < 10) {
+                    $minute = '0' . $minute;
+                }
+
+               //TRANS: %1$d the number of hours, %2$s the number of minutes : display 3h15
+                $values[$i] = sprintf(__('%1$dh%2$s'), $hour, $minute);
             }
         }
+
         return Dropdown::showFromArray($myname, $values, [
             'value'               => $params['value'],
             'display'             => $params['display'],
@@ -2714,13 +2714,16 @@ JAVASCRIPT;
                 $where["$table.id"] = $one_item;
             } else {
                 if (!empty($post['searchText'])) {
-                    $search = Search::makeTextSearchValue($post['searchText']);
+                    $raw_search     = Search::makeTextSearchValue($post['searchText']);
+                    $encoded_search = Sanitizer::encodeHtmlSpecialChars($raw_search);
 
                     $swhere = [
-                        "$table.completename" => ['LIKE', $search],
+                        ["$table.completename" => ['LIKE', $raw_search]],
+                        ["$table.completename" => ['LIKE', $encoded_search]],
                     ];
                     if (Session::haveTranslations($post['itemtype'], 'completename')) {
-                        $swhere["namet.value"] = ['LIKE', $search];
+                        $swhere[] = ["namet.value" => ['LIKE', $raw_search]];
+                        $swhere[] = ["namet.value" => ['LIKE', $encoded_search]];
                     }
 
                     if (
@@ -2733,7 +2736,8 @@ JAVASCRIPT;
                    // search also in displaywith columns
                     if ($displaywith && count($post['displaywith'])) {
                         foreach ($post['displaywith'] as $with) {
-                            $swhere["$table.$with"] = ['LIKE', $search];
+                            $swhere[] = ["$table.$with" => ['LIKE', $raw_search]];
+                            $swhere[] = ["$table.$with" => ['LIKE', $encoded_search]];
                         }
                     }
 
@@ -3105,8 +3109,13 @@ JAVASCRIPT;
             }
 
             if (!empty($post['searchText'])) {
-                $search = Search::makeTextSearchValue($post['searchText']);
-                $orwhere = ["$table.$field" => ['LIKE', $search]];
+                $raw_search     = Search::makeTextSearchValue($post['searchText']);
+                $encoded_search = Sanitizer::encodeHtmlSpecialChars($raw_search);
+
+                $orwhere = [
+                    ["$table.$field" => ['LIKE', $raw_search]],
+                    ["$table.$field" => ['LIKE', $encoded_search]],
+                ];
 
                 if (
                     $_SESSION['glpiis_ids_visible']
@@ -3116,20 +3125,24 @@ JAVASCRIPT;
                 }
 
                 if ($item instanceof CommonDCModelDropdown) {
-                    $orwhere[$table . '.product_number'] = ['LIKE', $search];
+                    $orwhere[] = [$table . '.product_number' => ['LIKE', $raw_search]];
+                    $orwhere[] = [$table . '.product_number' => ['LIKE', $encoded_search]];
                 }
 
                 if (Session::haveTranslations($post['itemtype'], $field)) {
-                    $orwhere['namet.value'] = ['LIKE', $search];
+                    $orwhere[] = ['namet.value' => ['LIKE', $raw_search]];
+                    $orwhere[] = ['namet.value' => ['LIKE', $encoded_search]];
                 }
                 if ($post['itemtype'] == "SoftwareLicense") {
-                    $orwhere['glpi_softwares.name'] = ['LIKE', $search];
+                    $orwhere[] = ['glpi_softwares.name' => ['LIKE', $raw_search]];
+                    $orwhere[] = ['glpi_softwares.name' => ['LIKE', $encoded_search]];
                 }
 
                // search also in displaywith columns
                 if ($displaywith && count($post['displaywith'])) {
                     foreach ($post['displaywith'] as $with) {
-                        $orwhere["$table.$with"] = ['LIKE', $search];
+                        $orwhere[] = ["$table.$with" => ['LIKE', $raw_search]];
+                        $orwhere[] = ["$table.$with" => ['LIKE', $encoded_search]];
                     }
                 }
 
@@ -3455,11 +3468,15 @@ JAVASCRIPT;
         }
 
         if (isset($post['searchText']) && (strlen($post['searchText']) > 0)) {
-            $search = Search::makeTextSearchValue($post['searchText']);
+            $raw_search     = Search::makeTextSearchValue($post['searchText']);
+            $encoded_search = Sanitizer::encodeHtmlSpecialChars($raw_search);
             $where['OR'] = [
-                "$table.name"        => ['LIKE', $search],
-                "$table.otherserial" => ['LIKE', $search],
-                "$table.serial"      => ['LIKE', $search]
+                ["$table.name"        => ['LIKE', $raw_search]],
+                ["$table.name"        => ['LIKE', $encoded_search]],
+                ["$table.otherserial" => ['LIKE', $raw_search]],
+                ["$table.otherserial" => ['LIKE', $encoded_search]],
+                ["$table.serial"      => ['LIKE', $raw_search]],
+                ["$table.serial"      => ['LIKE', $encoded_search]],
             ];
         }
 
