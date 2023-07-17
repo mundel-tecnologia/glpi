@@ -223,7 +223,7 @@ class User extends CommonDBTM
 
         if (isset($this->fields['id'])) {
             foreach ($CFG_GLPI['user_pref_field'] as $f) {
-                if (is_null($this->fields[$f])) {
+                if (array_key_exists($f, $CFG_GLPI) && (!array_key_exists($f, $this->fields) || is_null($this->fields[$f]))) {
                     $this->fields[$f] = $CFG_GLPI[$f];
                 }
             }
@@ -562,7 +562,13 @@ class User extends CommonDBTM
                     ]
                 ]
             ],
-            'WHERE' => [UserEmail::getTable() . '.email' => $email] + $condition
+            'WHERE' =>
+                [
+                    'RAW' => [
+                        'LOWER(' . UserEmail::getTable() . '.email' . ')'  => Toolbox::strtolower($email)
+                    ]
+                ]
+             + $condition
         ];
 
         $data = iterator_to_array($DB->request($query));
