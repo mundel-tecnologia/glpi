@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @copyright 2010-2022 by the FusionInventory Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
@@ -189,6 +189,7 @@ class VirtualMachine extends InventoryAsset
      */
     protected function getExisting(): array
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $db_existing = [];
@@ -285,6 +286,7 @@ class VirtualMachine extends InventoryAsset
      */
     protected function createVmComputer()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $computervm = new Computer();
@@ -321,7 +323,7 @@ class VirtualMachine extends InventoryAsset
                         $computers_vm_id = $computervm->add($input);
                     } else {
                         //refused by rules
-                        return;
+                        continue;
                     }
                 } else {
                     // Update computer
@@ -375,6 +377,7 @@ class VirtualMachine extends InventoryAsset
 
     public function getExistingVMAsComputer(\stdClass $vm): int
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $computers_vm_id = 0;

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -78,7 +78,8 @@ class MailCollector extends DbTestCase
                    'date_creation'        => '',
                    'requester_field'      => '',
                    'add_cc_to_observer'   => '',
-                   'collect_only_unread'  => ''
+                   'collect_only_unread'  => '',
+                   'last_collect_date'    => '',
                ]);
     }
 
@@ -672,19 +673,15 @@ class MailCollector extends DbTestCase
         ];
 
         $msg = null;
-        $this->output(
+        $this->when(
             function () use (&$msg) {
-                $this->when(
-                    function () use (&$msg) {
-                        $msg = $this->collector->collect($this->mailgate_id);
-                    }
-                )
-                ->error()
-                    ->withType(E_USER_WARNING)
-                    ->withMessage('Invalid header "X-Invalid-Encoding"')
-                    ->exists();
+                $msg = $this->collector->collect($this->mailgate_id);
             }
-        )->matches('/^(.*\n){' . count($expected_logged_errors) . '}$/'); // Ensure that output has same count of lines than expected error count
+        )
+        ->error()
+            ->withType(E_USER_WARNING)
+            ->withMessage('Invalid header "X-Invalid-Encoding"')
+            ->exists();
 
         // Check error log and clean it (to prevent test failure, see GLPITestCase::afterTestMethod()).
         foreach ($expected_logged_errors as $error_message => $error_level) {
@@ -794,6 +791,8 @@ class MailCollector extends DbTestCase
                     '40.1 - Empty content (multipart)',
                     '40.2 - Empty content (html)',
                     '40.3 - Empty content (plain text)',
+                    '41 - Image src without quotes',
+                    '42 - Missing Content Type'
                 ]
             ],
          // Mails having "normal" user as observer (add_cc_to_observer = true)
@@ -891,6 +890,20 @@ PLAINTEXT,
             '40.1 - Empty content (multipart)' => '',
             '40.2 - Empty content (html)' => '',
             '40.3 - Empty content (plain text)' => '',
+            '42 - Missing Content Type' => <<<PLAINTEXT
+Notifications in this message: 3
+================================
+
+15:23:03 UPS Notification from rtr.XXXX - Tue, 28 Nov 2023 15:23:03 +0100
+
+Communications with UPS SC1500I lost
+15:23:08 UPS Notification from rtr.XXXX - Tue, 28 Nov 2023 15:23:08 +0100
+
+UPS SC1500I is unavailable
+15:23:13 UPS Notification from rtr.XXXX - Tue, 28 Nov 2023 15:23:13 +0100
+
+Communications with UPS SC1500I established
+PLAINTEXT,
         ];
 
         foreach ($actors_specs as $actor_specs) {
@@ -946,6 +959,7 @@ PLAINTEXT,
             '1234567890_2' => 'text/plain',
             '1234567890_3' => 'text/plain',
             '37-red-dot.png' => 'image/png',
+            '41-blue-dot.png' => 'image/png',
         ];
 
         $iterator = $DB->request(

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -121,6 +121,7 @@ class ReminderTranslation extends CommonDBChild
      **/
     public static function showTranslations(Reminder $item)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $canedit = $item->can($item->getID(), UPDATE);
@@ -297,6 +298,7 @@ class ReminderTranslation extends CommonDBChild
      **/
     public static function isReminderTranslationActive()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         return $CFG_GLPI['translate_reminders'];
@@ -346,6 +348,7 @@ class ReminderTranslation extends CommonDBChild
      **/
     public static function getAlreadyTranslatedForItem($item)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $tab = [];

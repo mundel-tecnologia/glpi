@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -112,6 +112,7 @@ class Problem_Ticket extends CommonDBRelation
      **/
     public function post_addItem()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $donotif = !isset($this->input['_disablenotif']) && $CFG_GLPI["use_notifications"];
@@ -134,6 +135,7 @@ class Problem_Ticket extends CommonDBRelation
      **/
     public function post_deleteFromDB()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $donotif = !isset($this->input['_disablenotif']) && $CFG_GLPI["use_notifications"];

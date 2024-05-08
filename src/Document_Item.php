@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -599,7 +599,11 @@ class Document_Item extends CommonDBRelation
      **/
     public static function showAddFormForItem(CommonDBTM $item, $withtemplate = 0, $options = [])
     {
-        global $DB, $CFG_GLPI;
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
+        global $CFG_GLPI, $DB;
 
        //default options
         $params['rand'] = mt_rand();
@@ -646,7 +650,6 @@ class Document_Item extends CommonDBRelation
                     $entities = $entity;
                 }
             }
-            $limit = getEntitiesRestrictRequest(" AND ", "glpi_documents", '', $entities, true);
 
             $count = $DB->request([
                 'COUNT'     => 'cpt',
@@ -737,6 +740,7 @@ class Document_Item extends CommonDBRelation
      */
     public static function showListForItem(CommonDBTM $item, $withtemplate = 0, $options = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
        //default options

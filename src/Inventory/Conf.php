@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @copyright 2010-2022 by the FusionInventory Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
@@ -259,7 +259,11 @@ class Conf extends CommonGLPI
                 ];
             }
         } catch (\Throwable $e) {
-            throw $e;
+            $result = [
+                'success' => false,
+                'message' => sprintf(__('An error occurs during import: `%s`.'), $e->getMessage()),
+                'items'   => $inventory_request->getInventory()->getItems(),
+            ];
         }
 
         $result['request'] = $inventory_request;
@@ -293,7 +297,7 @@ class Conf extends CommonGLPI
     /**
      * Get possible actions for stale agents
      *
-     * @return string
+     * @return array
      */
     public static function getStaleAgentActions(): array
     {
@@ -355,6 +359,10 @@ class Conf extends CommonGLPI
      **/
     public function showConfigForm()
     {
+        /**
+         * @var array $CFG_GLPI
+         * @var array $PLUGIN_HOOKS
+         */
         global $CFG_GLPI, $PLUGIN_HOOKS;
 
         $config = \Config::getConfigurationValues('inventory');

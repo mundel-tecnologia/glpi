@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -784,10 +784,6 @@ abstract class APIBaseClass extends atoum
     {
         $computer = $this->createComputer();
         $computers_id = $computer->getID();
-
-       // create a network port for the previous computer
-        $this->createNetworkPort($computers_id);
-
        // Get the User TU_USER
         $uid = getItemByTypeName('User', TU_USER, true);
         $data = $this->query(
@@ -847,8 +843,30 @@ abstract class APIBaseClass extends atoum
          ->hasKey('name')
          ->hasKey('_networkports');
 
-        $this->array($data['_networkports'])
-         ->hasKey('NetworkPortEthernet');
+        $this->array($data['_networkports'])->hasKey('NetworkPortEthernet');
+        $this->array($data['_networkports']['NetworkPortEthernet'])->isEmpty();
+
+       // create a network port for the computer
+        $this->createNetworkPort($computers_id);
+
+        $data = $this->query(
+            'getItem',
+            ['itemtype' => 'Computer',
+                'id'       => $computers_id,
+                'headers'  => ['Session-Token' => $this->session_token],
+                'query'    => ['with_networkports' => true]
+            ]
+        );
+
+        $this->variable($data)->isNotFalse();
+
+        $this->array($data)
+         ->hasKey('id')
+         ->hasKey('name')
+         ->hasKey('_networkports');
+
+        $this->array($data['_networkports'])->hasKey('NetworkPortEthernet');
+        $this->array($data['_networkports']['NetworkPortEthernet'])->isNotEmpty();
 
         $this->array($data['_networkports']['NetworkPortEthernet'][0])->hasKey('NetworkName');
 
@@ -1700,7 +1718,8 @@ abstract class APIBaseClass extends atoum
 
         // get the password recovery token
         $user = getItemByTypeName('User', TU_USER);
-        $token = $user->getField('password_forget_token');
+        $token = $user->fields['password_forget_token'];
+        $this->string($token)->isNotEmpty();
 
         // Test reset password with a bad token
         $res = $this->query(
@@ -1734,15 +1753,21 @@ abstract class APIBaseClass extends atoum
         $newHash = $user->getField('password');
 
         // Restore the initial password in the DB
-        $updateSuccess = $user->update([
-            'id'        => $user->getID(),
-            'password'  => TU_PASS,
-            'password2' => TU_PASS
-        ]);
+        global $DB;
+        $updateSuccess = $DB->update(
+            'glpi_users',
+            ['password' => Auth::getPasswordHash(TU_PASS)],
+            ['id'       => $user->getID()]
+        );
         $this->variable($updateSuccess)->isNotFalse('password update failed');
 
         // Test the new password was saved
         $this->variable(\Auth::checkPassword('NewPassword', $newHash))->isNotFalse();
+
+        // Validates that password reset token has been removed
+        $user = getItemByTypeName('User', TU_USER);
+        $token = $user->fields['password_forget_token'];
+        $this->string($token)->isEmpty();
 
         //diable notifications
         Config::setConfigurationValues('core', [

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -125,7 +125,7 @@ class KnowbaseItemTranslation extends CommonDBChild
                     break;
 
                 case 3:
-                    $item->showForm($item->getID());
+                    $item->showForm($item->getID(), ['parent' => $item]);
                     break;
             }
         } else if (self::canBeTranslated($item)) {
@@ -143,6 +143,7 @@ class KnowbaseItemTranslation extends CommonDBChild
      **/
     public function showFull($options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!$this->can($this->fields['id'], READ)) {
@@ -185,6 +186,7 @@ class KnowbaseItemTranslation extends CommonDBChild
      **/
     public static function showTranslations(KnowbaseItem $item)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $canedit = $item->can($item->getID(), UPDATE);
@@ -370,6 +372,7 @@ class KnowbaseItemTranslation extends CommonDBChild
      **/
     public static function isKbTranslationActive()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         return $CFG_GLPI['translate_kb'];
@@ -419,6 +422,7 @@ class KnowbaseItemTranslation extends CommonDBChild
      **/
     public static function getAlreadyTranslatedForItem($item)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $tab = [];

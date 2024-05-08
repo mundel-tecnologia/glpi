@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -333,11 +333,11 @@ SQL
         class_alias(get_class($item_class), $itemtype);
 
         $this->newTestedInstance($DB);
-        $DB->query(sprintf($create_table_sql, $table_name));
+        $DB->doQuery(sprintf($create_table_sql, $table_name));
         $missing_keys  = $this->testedInstance->getMissingKeys($table_name);
         $misnamed_keys = $this->testedInstance->getMisnamedKeys($table_name);
         $useless_keys = $this->testedInstance->getUselessKeys($table_name);
-        $DB->query(sprintf('DROP TABLE `%s`', $table_name));
+        $DB->doQuery(sprintf('DROP TABLE `%s`', $table_name));
 
         $this->array($missing_keys)->isEqualTo($expected_missing);
         $this->array($misnamed_keys)->isEqualTo($expected_misnamed);

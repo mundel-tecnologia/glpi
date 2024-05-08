@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -309,8 +309,6 @@ $empty_data_builder = new class
             'dbversion' => 'FILLED AT INSTALL',
             'smtp_max_retries' => '5',
             'smtp_sender' => null,
-            'from_email' => null,
-            'from_email_name' => null,
             'instance_uuid' => null,
             'registration_uuid' => null,
             'smtp_retry_time' => '5',
@@ -2866,7 +2864,7 @@ $empty_data_builder = new class
                 'is_active' => 1,
             ], [
                 'id' => 72,
-                'name' => 'New user mentionned',
+                'name' => 'New user mentioned',
                 'itemtype' => 'Ticket',
                 'event' => 'user_mention',
                 'is_recursive' => 1,
@@ -5032,7 +5030,7 @@ style="color: #8b8c8f; font-weight: bold; text-decoration: underline;"&gt;
             ], [
                 'profiles_id' => self::PROFILE_SUPERVISOR,
                 'name' => 'domain',
-                'rights' => READ | UPDATE | CREATE | PURGE,
+                'rights' => READ | UPDATE | CREATE | DELETE | PURGE,
             ], [
                 'profiles_id' => self::PROFILE_SELF_SERVICE,
                 'name' => 'profile',
@@ -5901,7 +5899,7 @@ style="color: #8b8c8f; font-weight: bold; text-decoration: underline;"&gt;
             ], [
                 'profiles_id' => self::PROFILE_SUPER_ADMIN,
                 'name' => 'domain',
-                'rights' => READ | UPDATE | CREATE | PURGE,
+                'rights' => READ | UPDATE | CREATE | DELETE | PURGE,
             ], [
                 'profiles_id' => self::PROFILE_SUPER_ADMIN,
                 'name' => 'profile',
@@ -6200,7 +6198,7 @@ style="color: #8b8c8f; font-weight: bold; text-decoration: underline;"&gt;
             ], [
                 'profiles_id' => self::PROFILE_ADMIN,
                 'name' => 'domain',
-                'rights' => READ | UPDATE | CREATE | PURGE,
+                'rights' => READ | UPDATE | CREATE | DELETE | PURGE,
             ], [
                 'profiles_id' => self::PROFILE_HOTLINER,
                 'name' => 'profile',
@@ -7979,6 +7977,12 @@ style="color: #8b8c8f; font-weight: bold; text-decoration: underline;"&gt;
                 'profiles_id' => self::PROFILE_READ_ONLY,
                 'name' => 'unmanaged',
                 'rights' => self::RIGHT_NONE,
+
+            ],
+            [
+                'profiles_id' => self::PROFILE_SUPER_ADMIN,
+                'name' => 'system_logs',
+                'rights' => READ,
 
             ],
         ];

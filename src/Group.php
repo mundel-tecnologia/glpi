@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -38,12 +38,19 @@
  **/
 class Group extends CommonTreeDropdown
 {
+    use Glpi\Features\Clonable;
+
     public $dohistory       = true;
 
     public static $rightname       = 'group';
 
     protected $usenotepad  = true;
 
+
+    public function getCloneRelations(): array
+    {
+        return [];
+    }
 
     public static function getTypeName($nb = 0)
     {
@@ -639,6 +646,7 @@ class Group extends CommonTreeDropdown
      **/
     public function getDataItems(array $types, $field, $tree, $user, $start, array &$res)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
        // include item of child groups ?
@@ -740,10 +748,13 @@ class Group extends CommonTreeDropdown
                     'SELECT' => 'id',
                     'FROM'   => $item->getTable(),
                     'WHERE'  => $restrict[$itemtype],
-                    'ORDER'  => 'name',
                     'LIMIT'  => $max,
                     'START'  => $start
                 ];
+
+                if ($item->isField('name')) {
+                    $request['ORDER'] = 'name';
+                };
 
                 if ($itemtype == 'Consumable') {
                     $request['SELECT'] = 'glpi_consumableitems.id';
@@ -782,6 +793,7 @@ class Group extends CommonTreeDropdown
      **/
     public function showItems($tech)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $rand = mt_rand();
@@ -962,6 +974,7 @@ class Group extends CommonTreeDropdown
     public function cleanRelationData()
     {
 
+        /** @var \DBmysql $DB */
         global $DB;
 
         parent::cleanRelationData();
@@ -1022,7 +1035,7 @@ class Group extends CommonTreeDropdown
     {
         if (
             Session::getCurrentInterface() == 'helpdesk'
-            && ($anon = self::getAnonymizedName()) !== ""
+            && ($anon = self::getAnonymizedName()) !== null
         ) {
             return $anon;
         }
@@ -1035,7 +1048,7 @@ class Group extends CommonTreeDropdown
     {
         if (
             Session::getCurrentInterface() == 'helpdesk'
-            && ($anon = $this->getAnonymizedName()) !== ""
+            && ($anon = $this->getAnonymizedName()) !== null
         ) {
             return $anon;
         }
@@ -1044,12 +1057,12 @@ class Group extends CommonTreeDropdown
     }
 
 
-    public static function getAnonymizedName(?int $entities_id = null): string
+    public static function getAnonymizedName(?int $entities_id = null): ?string
     {
         switch (Entity::getAnonymizeConfig($entities_id)) {
             default:
             case Entity::ANONYMIZE_DISABLED:
-                return "";
+                return null;
 
             case Entity::ANONYMIZE_USE_GENERIC:
             case Entity::ANONYMIZE_USE_NICKNAME:

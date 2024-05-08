@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -40,7 +40,10 @@ use CommonITILActor;
 use DBConnection;
 use DbTestCase;
 use Glpi\Toolbox\Sanitizer;
+use Group_User;
+use Psr\Log\LogLevel;
 use Ticket;
+use User;
 
 /* Test for inc/search.class.php */
 
@@ -51,7 +54,7 @@ class Search extends DbTestCase
 {
     private function doSearch($itemtype, $params, array $forcedisplay = [])
     {
-        global $DEBUG_SQL;
+        global $DEBUG_SQL, $CFG_GLPI;
 
        // check param itemtype exists (to avoid search errors)
         if ($itemtype !== 'AllAssets') {
@@ -61,6 +64,12 @@ class Search extends DbTestCase
        // login to glpi if needed
         if (!isset($_SESSION['glpiname'])) {
             $this->login();
+        }
+
+        // force item lock
+        if (in_array($itemtype, $CFG_GLPI['lock_lockable_objects'])) {
+            $CFG_GLPI["lock_use_lock_item"] = 1;
+            $CFG_GLPI["lock_item_list"] = [$itemtype];
         }
 
        // force session in debug mode (to store & retrieve sql errors)
@@ -531,6 +540,91 @@ class Search extends DbTestCase
 
        //expecting one result
         $this->integer($data['data']['totalcount'])->isIdenticalTo(1);
+    }
+
+    /**
+     * This test will ensure that search options are using a valid datatype.
+     */
+    public function testSearchOptionsDatatype(): void
+    {
+        // Valid search options datatype
+        $valid_datatypes = [
+            // relational datatypes
+            'dropdown',
+            'itemlink',
+            'itemtypename',
+
+            // basic datatypes
+            'bool',
+
+            'number',
+            'integer',
+            'decimal',
+            'count',
+
+            'datetime',
+            'date',
+
+            'string',
+            'text',
+
+            // specific datatypes
+            'color',
+            'date_delay',
+            'email',
+            'language',
+            'mac',
+            'mio',
+            'progressbar',
+            'right',
+            'timestamp',
+            'weblink',
+
+            'specific',
+        ];
+
+        $classes = $this->getClasses(
+            false,
+            [
+                \CommonDBTM::class, // should be abstract
+                \CommonImplicitTreeDropdown::class, // should be abstract
+                \CommonITILRecurrentCron::class, // not searchable
+                \Item_Devices::class, // should be abstract
+                \NetworkPortMigration::class, // has no table by default
+                \NetworkPortInstantiation::class, // should be abstract
+                \NotificationSettingConfig::class, // not searchable
+                \PendingReasonCron::class, // not searchable
+            ]
+        );
+        foreach ($classes as $class) {
+            if (!is_a($class, \CommonDBTM::class, true)) {
+                continue;
+            }
+
+            $item = new $class();
+
+            $search_options = $item->searchOptions();
+
+            if (method_exists($class, 'rawSearchOptionsToAdd')) {
+                // `rawSearchOptionsToAdd` parameters are not identical on all methods, so we can
+                // only check classes on which this method has no parameters.
+                $reflection = new \ReflectionMethod($class, 'rawSearchOptionsToAdd');
+                if (count($reflection->getParameters()) === 0) {
+                    $search_options = array_merge($search_options, $item->getSearchOptionsToAdd());
+                }
+            }
+
+            foreach ($search_options as $so) {
+                $this->array($so);
+
+                if (!array_key_exists('datatype', $so)) {
+                    continue; // datatype can be undefined
+                }
+
+                $this->boolean(in_array($so['datatype'], $valid_datatypes))
+                    ->isTrue(sprintf('Unexpected `%s` search option datatype.', $so['datatype']));
+            }
+        }
     }
 
     /**
@@ -1285,6 +1379,7 @@ class Search extends DbTestCase
 
        // Complex cases
         $table_addtable = 'glpi_users_af1042e23ce6565cfe58c6db91f84692';
+        $table_ticket_user = 'glpi_tickets_users_019878060c6d5f06cbe3c4d7c31dec24';
 
         $_SESSION['glpinames_format'] = \User::FIRSTNAME_BEFORE;
         $user_order_1 = null;
@@ -1296,9 +1391,17 @@ class Search extends DbTestCase
          ->withType(E_USER_DEPRECATED)
          ->withMessage('The parameters for Search::addOrderBy have changed to allow sorting by multiple fields. Please update your calling code.')
             ->exists();
-        $this->string($user_order_1)->isEqualTo(" ORDER BY `$table_addtable`.`firstname` ASC,
-                                 `$table_addtable`.`realname` ASC,
-                                 `$table_addtable`.`name` ASC ");
+        $this->string($user_order_1)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) ASC ");
 
         $user_order_2 = null;
         $this->when(
@@ -1309,9 +1412,17 @@ class Search extends DbTestCase
          ->withType(E_USER_DEPRECATED)
          ->withMessage('The parameters for Search::addOrderBy have changed to allow sorting by multiple fields. Please update your calling code.')
             ->exists();
-        $this->string($user_order_2)->isEqualTo(" ORDER BY `$table_addtable`.`firstname` DESC,
-                                 `$table_addtable`.`realname` DESC,
-                                 `$table_addtable`.`name` DESC ");
+        $this->string($user_order_2)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) DESC ");
 
         $_SESSION['glpinames_format'] = \User::REALNAME_BEFORE;
         $user_order_3 = null;
@@ -1323,9 +1434,18 @@ class Search extends DbTestCase
          ->withType(E_USER_DEPRECATED)
          ->withMessage('The parameters for Search::addOrderBy have changed to allow sorting by multiple fields. Please update your calling code.')
             ->exists();
-        $this->string($user_order_3)->isEqualTo(" ORDER BY `$table_addtable`.`realname` ASC,
-                                 `$table_addtable`.`firstname` ASC,
-                                 `$table_addtable`.`name` ASC ");
+        $this->string($user_order_3)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) ASC ");
+
         $user_order_4 = null;
         $this->when(
             function () use (&$user_order_4) {
@@ -1335,9 +1455,17 @@ class Search extends DbTestCase
          ->withType(E_USER_DEPRECATED)
          ->withMessage('The parameters for Search::addOrderBy have changed to allow sorting by multiple fields. Please update your calling code.')
             ->exists();
-        $this->string($user_order_4)->isEqualTo(" ORDER BY `$table_addtable`.`realname` DESC,
-                                 `$table_addtable`.`firstname` DESC,
-                                 `$table_addtable`.`name` DESC ");
+        $this->string($user_order_4)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) DESC ");
     }
 
     /**
@@ -1350,6 +1478,7 @@ class Search extends DbTestCase
 
        // Complex cases
         $table_addtable = 'glpi_users_af1042e23ce6565cfe58c6db91f84692';
+        $table_ticket_user = 'glpi_tickets_users_019878060c6d5f06cbe3c4d7c31dec24';
 
         $_SESSION['glpinames_format'] = \User::FIRSTNAME_BEFORE;
         $user_order_1 = \Search::addOrderBy('Ticket', [
@@ -1358,18 +1487,34 @@ class Search extends DbTestCase
                 'order'        => 'ASC'
             ]
         ]);
-        $this->string($user_order_1)->isEqualTo(" ORDER BY `$table_addtable`.`firstname` ASC,
-                                 `$table_addtable`.`realname` ASC,
-                                 `$table_addtable`.`name` ASC ");
+        $this->string($user_order_1)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) ASC ");
         $user_order_2 = \Search::addOrderBy('Ticket', [
             [
                 'searchopt_id' => 4,
                 'order'        => 'DESC'
             ]
         ]);
-        $this->string($user_order_2)->isEqualTo(" ORDER BY `$table_addtable`.`firstname` DESC,
-                                 `$table_addtable`.`realname` DESC,
-                                 `$table_addtable`.`name` DESC ");
+        $this->string($user_order_2)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) DESC ");
 
         $_SESSION['glpinames_format'] = \User::REALNAME_BEFORE;
         $user_order_3 = \Search::addOrderBy('Ticket', [
@@ -1378,18 +1523,353 @@ class Search extends DbTestCase
                 'order'        => 'ASC'
             ]
         ]);
-        $this->string($user_order_3)->isEqualTo(" ORDER BY `$table_addtable`.`realname` ASC,
-                                 `$table_addtable`.`firstname` ASC,
-                                 `$table_addtable`.`name` ASC ");
+        $this->string($user_order_3)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) ASC ");
         $user_order_4 = \Search::addOrderBy('Ticket', [
             [
                 'searchopt_id' => 4,
                 'order'        => 'DESC'
             ]
         ]);
-        $this->string($user_order_4)->isEqualTo(" ORDER BY `$table_addtable`.`realname` DESC,
-                                 `$table_addtable`.`firstname` DESC,
-                                 `$table_addtable`.`name` DESC ");
+        $this->string($user_order_4)->isEqualTo(" ORDER BY GROUP_CONCAT(DISTINCT CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')
+                                ) ORDER BY CONCAT(
+                                    IFNULL(`$table_addtable`.`realname`, ''),
+                                    IFNULL(`$table_addtable`.`firstname`, ''),
+                                    IFNULL(`$table_addtable`.`name`, ''),
+                                IFNULL(`$table_ticket_user`.`alternative_email`, '')) ASC
+                                ) DESC ");
+    }
+
+    /**
+     * Data provider for testAddOrderByUser
+     */
+    protected function testAddOrderByUserProvider(): iterable
+    {
+        $this->login('glpi', 'glpi');
+
+        $user_1 = getItemByTypeName('User', TU_USER)->getID();
+        $user_2 = getItemByTypeName('User', 'glpi')->getID();
+        $group_1 = getItemByTypeName('Group', '_test_group_1')->getID();
+
+        // Creates Changes with different requesters
+        $this->createItems('Change', [
+            // Test set on requester
+            [
+                'name' => 'testAddOrderByUser user 1 (R)',
+                'content' => '',
+                '_actors' => [
+                    'requester' => [['itemtype' => 'User', 'items_id' => $user_1]],
+                ]
+            ],
+            [
+                'name' => 'testAddOrderByUser user 2 (R)',
+                'content' => '',
+                '_actors' => [
+                    'requester' => [['itemtype' => 'User', 'items_id' => $user_2]],
+                ]
+            ],
+            [
+                'name' => 'testAddOrderByUser user 1 (R) + user 2 (R)',
+                'content' => '',
+                '_actors' => [
+                    'requester' => [
+                        ['itemtype' => 'User', 'items_id' => $user_1],
+                        ['itemtype' => 'User', 'items_id' => $user_2],
+                    ],
+                ]
+            ],
+            [
+                'name' => 'testAddOrderByUser anonymous user (R)',
+                'content' => '',
+                '_actors' => [
+                    'requester' => [
+                        [
+                            'itemtype' => 'User',
+                            'items_id' => 0,
+                            "alternative_email" => "myemail@email.com",
+                            'use_notification' => true
+                        ]
+                    ],
+                ]
+            ],
+            [
+                'name' => 'testAddOrderByUser group 1 (R)',
+                'content' => '',
+                '_actors' => [
+                    'requester' => [['itemtype' => 'Group', 'items_id' => $group_1]],
+                ]
+            ],
+            [
+                'name' => 'testAddOrderByUser user 1 (R) + group 1 (R)',
+                'content' => '',
+                '_actors' => [
+                    'requester' => [
+                        ['itemtype' => 'User', 'items_id' => $user_1],
+                        ['itemtype' => 'Group', 'items_id' => $group_1],
+                    ],
+                ]
+            ],
+        ]);
+
+        yield [
+            'itemtype' => 'Change',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 4,
+                'order' => 'ASC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser group 1 (R)',              //  no requester
+                'testAddOrderByUser user 1 (R)',               //  _test_user
+                'testAddOrderByUser user 1 (R) + group 1 (R)', //  _test_user
+                'testAddOrderByUser user 1 (R) + user 2 (R)',  //  _test_user, glpi
+                'testAddOrderByUser user 2 (R)',               //  glpi
+                'testAddOrderByUser anonymous user (R)',       //  myemail@email.com
+            ],
+            'row_name' => 'ITEM_Change_1'
+        ];
+
+        yield [
+            'itemtype' => 'Change',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 4,
+                'order' => 'DESC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser anonymous user (R)',       //  myemail@email.com
+                'testAddOrderByUser user 2 (R)',               //  glpi
+                'testAddOrderByUser user 1 (R) + user 2 (R)',  //  _test_user, glpi
+                'testAddOrderByUser user 1 (R)',               //  _test_user
+                'testAddOrderByUser user 1 (R) + group 1 (R)', //  _test_user
+                'testAddOrderByUser group 1 (R)',              //  no requester
+            ],
+            'row_name' => 'ITEM_Change_1'
+        ];
+
+        // Creates Peripheral with different users
+        $this->createItems('Peripheral', [
+            // Test set on user
+            [
+                'name' => 'testAddOrderByUser user 1 (U)',
+                'entities_id' => 0,
+                'users_id' => $user_1,
+            ],
+            [
+                'name' => 'testAddOrderByUser user 2 (U)',
+                'entities_id' => 0,
+                'users_id' => $user_2,
+            ],
+            [
+                'name' => 'testAddOrderByUser no user',
+                'entities_id' => 0,
+            ],
+        ]);
+
+        yield [
+            'itemtype' => 'Peripheral',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 70,
+                'order' => 'ASC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser no user',
+                'testAddOrderByUser user 1 (U)', // _test_user
+                'testAddOrderByUser user 2 (U)', // glpi
+            ],
+            'row_name' => 'ITEM_Peripheral_1'
+        ];
+
+        yield [
+            'itemtype' => 'Peripheral',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 70,
+                'order' => 'DESC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser user 2 (U)', // glpi
+                'testAddOrderByUser user 1 (U)', // _test_user
+                'testAddOrderByUser no user',
+            ],
+            'row_name' => 'ITEM_Peripheral_1'
+        ];
+
+        // Creates Problems with different writers
+        // Create by glpi user
+        $this->createItems('Problem', [
+            [
+                'name' => 'testAddOrderByUser by glpi',
+                'content' => '',
+            ],
+        ]);
+
+        // Create by tech user
+        $this->login('tech', 'tech');
+        $this->createItems('Problem', [
+            [
+                'name' => 'testAddOrderByUser by tech',
+                'content' => '',
+            ],
+        ]);
+
+        $this->login('glpi', 'glpi');
+
+        yield [
+            'itemtype' => 'Problem',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 22,
+                'order' => 'ASC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser by glpi',
+                'testAddOrderByUser by tech',
+            ],
+            'row_name' => 'ITEM_Problem_1'
+        ];
+
+        yield [
+            'itemtype' => 'Problem',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 22,
+                'order' => 'DESC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser by tech',
+                'testAddOrderByUser by glpi',
+            ],
+            'row_name' => 'ITEM_Problem_1'
+        ];
+
+        // Last edit by
+        yield [
+            'itemtype' => 'Problem',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 64,
+                'order' => 'ASC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser by glpi',
+                'testAddOrderByUser by tech',
+            ],
+            'row_name' => 'ITEM_Problem_1'
+        ];
+
+        yield [
+            'itemtype' => 'Problem',
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    [
+                        'field' => 1,
+                        'searchtype' => 'contains',
+                        'value' => 'testAddOrderByUser',
+                    ],
+                ],
+                'sort' => 64,
+                'order' => 'DESC',
+            ],
+            'expected_order' => [
+                'testAddOrderByUser by tech',
+                'testAddOrderByUser by glpi',
+            ],
+            'row_name' => 'ITEM_Problem_1'
+        ];
+    }
+
+    /**
+     * @dataProvider testAddOrderByUserProvider
+     */
+    public function testAddOrderByUser(
+        string $itemtype,
+        array $search_params,
+        array $expected_order,
+        string $row_name
+    ) {
+        $data = $this->doSearch($itemtype, $search_params);
+
+        // Extract items names
+        $items = [];
+        foreach ($data['data']['rows'] as $row) {
+            $items[] = $row['raw'][$row_name];
+        }
+
+        // Validate order
+        $this->array($items)->isEqualTo($expected_order);
     }
 
     private function cleanSQL($sql)
@@ -1664,8 +2144,8 @@ class Search extends DbTestCase
             ['quot\\\'ed', '%quot\\\'ed%'], // already escaped value should not produce double escaping
             ['^&#60;PROD-15&#62;', '<PROD-15>%'],
             ['<PROD-15>$', '%<PROD-15>'],
-            ['A&#38;B', '%A&B%'],
-            ['A&B', '%A&B%'],
+            ['A&#38;B', '%A&#38;B%'],
+            ['A&B', '%A&#38;B%'],
             ["backslashes \\ \\\\ are twice escaped when not used in ', \n, \r, ... ", "%backslashes \\\\\\\\ \\\\\\\\\\\\\\\\ are twice escaped when not used in \', \\n, \\r, ...%"],
         ];
     }
@@ -1899,7 +2379,11 @@ class Search extends DbTestCase
          ->contains("`glpi_users_users_id_recipient`.`id` = '{$user_normal_id}'")
 
          // Check that ORDER applies on corresponding table alias
-         ->contains("`glpi_users_users_id_recipient`.`name` ASC");
+         ->contains("CONCAT(
+                                    IFNULL(`glpi_users_users_id_recipient`.`realname`, ''),
+                                    IFNULL(`glpi_users_users_id_recipient`.`firstname`, ''),
+                                    IFNULL(`glpi_users_users_id_recipient`.`name`, '')
+                                ) ASC");
     }
 
     public function testSearchAllAssets()
@@ -3082,6 +3566,49 @@ class Search extends DbTestCase
             // Not very logical but GLPI return the same results for a contains "" and not contains "" queries
             $all_tickets
         );
+
+        // Data set for tests on user searches
+        list (
+            $user_without_groups,
+            $user_group_1,
+            $user_group_1_and_2
+        ) = $this->createItems(User::class, [
+            ['name' => 'user_without_groups'],
+            ['name' => 'user_group_1'],
+            ['name' => 'user_group_1_and_2'],
+        ]);
+        $this->createItems(Group_User::class, [
+            ['users_id' => $user_group_1->getID(), 'groups_id' => $group_1],
+            ['users_id' => $user_group_1_and_2->getID(), 'groups_id' => $group_1],
+            ['users_id' => $user_group_1_and_2->getID(), 'groups_id' => $group_2],
+        ]);
+        $all_users = ['user_without_groups', 'user_group_1', 'user_group_1_and_2'];
+        $base_condition = [
+            'link'       => 'AND',
+            'field'      => 1, // Name
+            'searchtype' => 'contains',
+            'value'      => "user_",
+        ];
+
+        // Search users by groups
+        yield from $this->testCriteriaWithSubqueriesProvider_getAllCombination(
+            'User',
+            $base_condition,
+            $all_users,
+            ['user_group_1', 'user_group_1_and_2'],
+            13, // Groups
+            'equals',
+            $group_1
+        );
+        yield from $this->testCriteriaWithSubqueriesProvider_getAllCombination(
+            'User',
+            $base_condition,
+            $all_users,
+            ['user_group_1', 'user_group_1_and_2'],
+            13, // Groups
+            'contains',
+            "Group 1"
+        );
     }
 
     /**
@@ -3100,7 +3627,14 @@ class Search extends DbTestCase
         // Parse results
         $names = [];
         foreach ($data['data']['rows'] as $row) {
-            $names[] = $row['raw']['ITEM_Ticket_1'];
+            $name = $row['raw']["ITEM_{$itemtype}_1"];
+
+            // Clear extra data that is sometimes added by the search engine to handle display
+            if (strpos($name, "$#$") !== false) {
+                $name = substr($name, 0, strpos($name, "$#$"));
+            }
+
+            $names[] = $name;
         }
 
         // Sort both array as atoum is "position sensitive"
@@ -3119,6 +3653,1481 @@ class Search extends DbTestCase
 
         // Validate results
         $this->array($names)->isEqualTo($expected);
+    }
+
+    protected function containsCriterionProvider(): iterable
+    {
+        // Note:
+        // Following datatypes are not tested as they do not support `contains` search operator:
+        //  - bool
+        //  - itemtypename
+        //  - right
+        // Some other datatypes are not tested for the `usehaving=true` case, or when a `computation` is
+        // required, because there is no search option that corresponds to it yet.
+
+        global $DB;
+        $version_string = $DB->getVersion();
+        $server  = preg_match('/-MariaDB/', $version_string) ? 'MariaDB' : 'MySQL';
+        $version = preg_replace('/^((\d+\.?)+).*$/', '$1', $version_string);
+        $is_mariadb      = $server === 'MariaDB';
+        $is_mariadb_10_2 = $is_mariadb && version_compare($version, '10.3', '<');
+        $is_mysql_5_7    = $server === 'MySQL' && version_compare($version, '8.0', '<');
+
+
+        // Check simple values search.
+        // Usage is only relevant for textual fields, so it is not tested on other fields.
+
+        // datatype=dropdown
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 4, // type
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_computertypes`.`name` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_computertypes`.`name` NOT LIKE '%test%' OR `glpi_computertypes`.`name` IS NULL)",
+        ];
+
+        // datatype=dropdown (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 142, // document name
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Ticket_142` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_142` NOT LIKE '%test%' OR `ITEM_Ticket_142` IS NULL)",
+        ];
+
+        // datatype=itemlink
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 1, // name
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_computers`.`name` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_computers`.`name` NOT LIKE '%test%' OR `glpi_computers`.`name` IS NULL)",
+        ];
+
+        // datatype=itemlink (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 50, // parent tickets
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Ticket_50` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_50` NOT LIKE '%test%' OR `ITEM_Ticket_50` IS NULL)",
+        ];
+
+        // datatype=string
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 47, // uuid
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_computers`.`uuid` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_computers`.`uuid` NOT LIKE '%test%' OR `glpi_computers`.`uuid` IS NULL)",
+        ];
+
+        // datatype=text
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 16, // comment
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_computers`.`comment` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_computers`.`comment` NOT LIKE '%test%' OR `glpi_computers`.`comment` IS NULL)",
+        ];
+
+        // datatype=integer
+        yield [
+            'itemtype'          => \AuthLDAP::class,
+            'search_option'     => 4, // port
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_authldaps`.`port` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_authldaps`.`port` NOT LIKE '%test%' OR `glpi_authldaps`.`port` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \AuthLDAP::class,
+            'search_option'     => 4, // port
+            'value'             => '123',
+            'expected_and'      => "(`glpi_authldaps`.`port` = 123)",
+            'expected_and_not'  => "(`glpi_authldaps`.`port` <> 123)",
+        ];
+
+        // datatype=number
+        yield [
+            'itemtype'          => \AuthLDAP::class,
+            'search_option'     => 32, // timeout
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_authldaps`.`timeout` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_authldaps`.`timeout` NOT LIKE '%test%' OR `glpi_authldaps`.`timeout` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \AuthLDAP::class,
+            'search_option'     => 32, // timeout
+            'value'             => '30',
+            'expected_and'      => "(`glpi_authldaps`.`timeout` = 30)",
+            'expected_and_not'  => "(`glpi_authldaps`.`timeout` <> 30)",
+        ];
+
+        // datatype=number (usehaving=true)
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 115, // harddrive capacity
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Computer_115` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Computer_115` NOT LIKE '%test%' OR `ITEM_Computer_115` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 115, // harddrive capacity
+            'value'             => '512',
+            'expected_and'      => "(`ITEM_Computer_115` < 1512 AND `ITEM_Computer_115` > -488)",
+            'expected_and_not'  => "(`ITEM_Computer_115` > 1512 OR `ITEM_Computer_115` < -488)",
+        ];
+
+        // datatype=decimal
+        yield [
+            'itemtype'          => \Budget::class,
+            'search_option'     => 7, // value
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_budgets`.`value` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_budgets`.`value` NOT LIKE '%test%' OR `glpi_budgets`.`value` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Budget::class,
+            'search_option'     => 7, // value
+            'value'             => '1500',
+            'expected_and'      => "(`glpi_budgets`.`value` LIKE '%1500.%')",
+            'expected_and_not'  => "(`glpi_budgets`.`value` NOT LIKE '%1500.%' OR `glpi_budgets`.`value` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Budget::class,
+            'search_option'     => 7, // value
+            'value'             => '10.25',
+            'expected_and'      => "(`glpi_budgets`.`value` LIKE '%10.2%')",
+            'expected_and_not'  => "(`glpi_budgets`.`value` NOT LIKE '%10.2%' OR `glpi_budgets`.`value` IS NULL)",
+        ];
+
+        // datatype=decimal (usehaving=true)
+        yield [
+            'itemtype'          => \Contract::class,
+            'search_option'     => 11, // totalcost
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Contract_11` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Contract_11` NOT LIKE '%test%' OR `ITEM_Contract_11` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Contract::class,
+            'search_option'     => 11, // totalcost
+            'value'             => '250',
+            'expected_and'      => "(`ITEM_Contract_11` = 250)",
+            'expected_and_not'  => "(`ITEM_Contract_11` <> 250)",
+        ];
+
+        // datatype=count (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 27, // number of followups
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Ticket_27` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_27` NOT LIKE '%test%' OR `ITEM_Ticket_27` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 27, // number of followups
+            'value'             => '10',
+            'expected_and'      => "(`ITEM_Ticket_27` = 10)",
+            'expected_and_not'  => "(`ITEM_Ticket_27` <> 10)",
+        ];
+
+        // datatype=mio (usehaving=true)
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 111, // memory size
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Computer_111` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Computer_111` NOT LIKE '%test%' OR `ITEM_Computer_111` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 111, // memory size
+            'value'             => '512',
+            'expected_and'      => "(`ITEM_Computer_111` < 612 AND `ITEM_Computer_111` > 412)",
+            'expected_and_not'  => "(`ITEM_Computer_111` > 612 OR `ITEM_Computer_111` < 412)",
+        ];
+
+        // datatype=progressbar (with computation)
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 152, // harddrive freepercent
+            'value'             => 'test',
+            'expected_and'      => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) LIKE '%test%')",
+            'expected_and_not'  => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) NOT LIKE '%test%' OR LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 152, // harddrive freepercent
+            'value'             => '50',
+            'expected_and'      => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) >= 48 AND LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) <= 52)",
+            'expected_and_not'  => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) < 48 OR LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) > 52 OR LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) IS NULL)",
+        ];
+
+        // datatype=timestamp
+        yield [
+            'itemtype'          => \CronTask::class,
+            'search_option'     => 6, // frequency
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_crontasks`.`frequency` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_crontasks`.`frequency` NOT LIKE '%test%' OR `glpi_crontasks`.`frequency` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \CronTask::class,
+            'search_option'     => 6, // frequency
+            'value'             => '3600',
+            'expected_and'      => "(`glpi_crontasks`.`frequency` = 3600)",
+            'expected_and_not'  => "(`glpi_crontasks`.`frequency` <> 3600)",
+        ];
+
+        // datatype=timestamp (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 49, // actiontime
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Ticket_49` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_49` NOT LIKE '%test%' OR `ITEM_Ticket_49` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 49, // actiontime
+            'value'             => '3600',
+            'expected_and'      => "(`ITEM_Ticket_49` = 3600)",
+            'expected_and_not'  => "(`ITEM_Ticket_49` <> 3600)",
+        ];
+
+        // datatype=datetime
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 9, // last_inventory_update
+            'value'             => 'test',
+            'expected_and'      => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) LIKE '%test%')",
+            'expected_and_not'  => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) NOT LIKE '%test%' OR CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 9, // last_inventory_update
+            'value'             => '2023-06',
+            'expected_and'      => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) LIKE '%2023-06%')",
+            'expected_and_not'  => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) NOT LIKE '%2023-06%' OR CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) IS NULL)",
+        ];
+
+        // datatype=datetime (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 188, // next_escalation_level
+            'value'             => 'test',
+            'expected_and'      => "(`ITEM_Ticket_188` LIKE '%test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_188` NOT LIKE '%test%' OR `ITEM_Ticket_188` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 188, // next_escalation_level
+            'value'             => '2023-06',
+            'expected_and'      => "(`ITEM_Ticket_188` LIKE '%2023-06%')",
+            'expected_and_not'  => "(`ITEM_Ticket_188` NOT LIKE '%2023-06%' OR `ITEM_Ticket_188` IS NULL)",
+        ];
+
+        // datatype=date
+        yield [
+            'itemtype'          => \Budget::class,
+            'search_option'     => 5, // begin_date
+            'value'             => 'test',
+            'expected_and'      => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) LIKE '%test%')",
+            'expected_and_not'  => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) NOT LIKE '%test%' OR CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Budget::class,
+            'search_option'     => 5, // begin_date
+            'value'             => '2023',
+            'expected_and'      => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) LIKE '%2023%')",
+            'expected_and_not'  => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) NOT LIKE '%2023%' OR CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) IS NULL)",
+        ];
+
+        // datatype=date_delay
+        yield [
+            'itemtype'          => \Contract::class,
+            'search_option'     => 20, // end_date
+            'value'             => 'test',
+            'expected_and'      => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) LIKE '%test%')",
+            'expected_and_not'  => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) NOT LIKE '%test%' OR ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) IS NULL)",
+        ];
+        if ($is_mysql_5_7) {
+            // log for both AND and AND NOT cases
+            $this->hasSqlLogRecordThatContains("Truncated incorrect date value: '%test%'", LogLevel::WARNING);
+            $this->hasSqlLogRecordThatContains("Truncated incorrect date value: '%test%'", LogLevel::WARNING);
+        }
+        yield [
+            'itemtype'          => \Contract::class,
+            'search_option'     => 20, // end_date
+            'value'             => '2023-12',
+            'expected_and'      => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) LIKE '%2023-12%')",
+            'expected_and_not'  => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) NOT LIKE '%2023-12%' OR ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) IS NULL)",
+        ];
+        if ($is_mysql_5_7) {
+            // log for both AND and AND NOT cases
+            $this->hasSqlLogRecordThatContains("Truncated incorrect date value: '%2023-12%'", LogLevel::WARNING);
+            $this->hasSqlLogRecordThatContains("Truncated incorrect date value: '%2023-12%'", LogLevel::WARNING);
+        }
+
+        // datatype=email
+        yield [
+            'itemtype'          => \Contact::class,
+            'search_option'     => 6, // email
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_contacts`.`email` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_contacts`.`email` NOT LIKE '%test%' OR `glpi_contacts`.`email` IS NULL)",
+        ];
+
+        // datatype=weblink
+        yield [
+            'itemtype'          => \Document::class,
+            'search_option'     => 4, // link
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_documents`.`link` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_documents`.`link` NOT LIKE '%test%' OR `glpi_documents`.`link` IS NULL)",
+        ];
+
+        // datatype=mac
+        yield [
+            'itemtype'          => \DeviceNetworkCard::class,
+            'search_option'     => 11, // mac_default
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` NOT LIKE '%test%' OR `glpi_devicenetworkcards`.`mac_default` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \DeviceNetworkCard::class,
+            'search_option'     => 11, // mac_default
+            'value'             => 'a2:ef:00',
+            'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` LIKE '%a2:ef:00%')",
+            'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` NOT LIKE '%a2:ef:00%' OR `glpi_devicenetworkcards`.`mac_default` IS NULL)",
+        ];
+
+        // datatype=color
+        yield [
+            'itemtype'          => \Cable::class,
+            'search_option'     => 15, // color
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_cables`.`color` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_cables`.`color` NOT LIKE '%test%' OR `glpi_cables`.`color` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Cable::class,
+            'search_option'     => 15, // color
+            'value'             => '#ffffff',
+            'expected_and'      => "(`glpi_cables`.`color` LIKE '%#ffffff%')",
+            'expected_and_not'  => "(`glpi_cables`.`color` NOT LIKE '%#ffffff%' OR `glpi_cables`.`color` IS NULL)",
+        ];
+
+        // datatype=language
+        yield [
+            'itemtype'          => \User::class,
+            'search_option'     => 17, // language
+            'value'             => 'test',
+            'expected_and'      => "(`glpi_users`.`language` LIKE '%test%')",
+            'expected_and_not'  => "(`glpi_users`.`language` NOT LIKE '%test%' OR `glpi_users`.`language` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \User::class,
+            'search_option'     => 17, // language
+            'value'             => 'en_',
+            'expected_and'      => "(`glpi_users`.`language` LIKE '%en\_%')",
+            'expected_and_not'  => "(`glpi_users`.`language` NOT LIKE '%en\_%' OR `glpi_users`.`language` IS NULL)",
+        ];
+
+        // Check `NULL` special value
+        foreach (['NULL', 'null'] as $null_value) {
+            // datatype=dropdown
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 4, // type
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_computertypes`.`name` IS NULL OR `glpi_computertypes`.`name` = '')",
+                'expected_and_not'  => "(`glpi_computertypes`.`name` IS NOT NULL AND `glpi_computertypes`.`name` <> '')",
+            ];
+
+            // datatype=dropdown (usehaving=true)
+            yield [
+                'itemtype'          => \Ticket::class,
+                'search_option'     => 142, // document name
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Ticket_142` IS NULL OR `ITEM_Ticket_142` = '')",
+                'expected_and_not'  => "(`ITEM_Ticket_142` IS NOT NULL AND `ITEM_Ticket_142` <> '')",
+            ];
+
+            // datatype=itemlink
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 1, // name
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_computers`.`name` IS NULL OR `glpi_computers`.`name` = '')",
+                'expected_and_not'  => "(`glpi_computers`.`name` IS NOT NULL AND `glpi_computers`.`name` <> '')",
+            ];
+
+            // datatype=itemlink (usehaving=true)
+            yield [
+                'itemtype'          => \Ticket::class,
+                'search_option'     => 50, // parent tickets
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Ticket_50` IS NULL OR `ITEM_Ticket_50` = '')",
+                'expected_and_not'  => "(`ITEM_Ticket_50` IS NOT NULL AND `ITEM_Ticket_50` <> '')",
+            ];
+
+            // datatype=string
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 47, // uuid
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_computers`.`uuid` IS NULL OR `glpi_computers`.`uuid` = '')",
+                'expected_and_not'  => "(`glpi_computers`.`uuid` IS NOT NULL AND `glpi_computers`.`uuid` <> '')",
+            ];
+
+            // datatype=text
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 16, // comment
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_computers`.`comment` IS NULL OR `glpi_computers`.`comment` = '')",
+                'expected_and_not'  => "(`glpi_computers`.`comment` IS NOT NULL AND `glpi_computers`.`comment` <> '')",
+            ];
+
+            // datatype=integer
+            yield [
+                'itemtype'          => \AuthLDAP::class,
+                'search_option'     => 4, // port
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_authldaps`.`port` IS NULL OR `glpi_authldaps`.`port` = '')",
+                'expected_and_not'  => "(`glpi_authldaps`.`port` IS NOT NULL AND `glpi_authldaps`.`port` <> '')",
+            ];
+            // log for both AND and AND NOT cases
+            if ($is_mariadb_10_2) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+            } elseif ($is_mariadb) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+            }
+
+            // datatype=number
+            yield [
+                'itemtype'          => \AuthLDAP::class,
+                'search_option'     => 32, // timeout
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_authldaps`.`timeout` IS NULL OR `glpi_authldaps`.`timeout` = '')",
+                'expected_and_not'  => "(`glpi_authldaps`.`timeout` IS NOT NULL AND `glpi_authldaps`.`timeout` <> '')",
+            ];
+            // log for both AND and AND NOT cases
+            if ($is_mariadb_10_2) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+            } elseif ($is_mariadb) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+            }
+
+            // datatype=number (usehaving=true)
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 115, // harddrive capacity
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Computer_115` IS NULL OR `ITEM_Computer_115` = '')",
+                'expected_and_not'  => "(`ITEM_Computer_115` IS NOT NULL AND `ITEM_Computer_115` <> '')",
+            ];
+
+            // datatype=decimal
+            yield [
+                'itemtype'          => \Budget::class,
+                'search_option'     => 7, // value
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_budgets`.`value` IS NULL OR `glpi_budgets`.`value` = '')",
+                'expected_and_not'  => "(`glpi_budgets`.`value` IS NOT NULL AND `glpi_budgets`.`value` <> '')",
+            ];
+            // log for both AND and AND NOT cases
+            $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+            $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+
+            // datatype=decimal (usehaving=true)
+            yield [
+                'itemtype'          => \Contract::class,
+                'search_option'     => 11, // totalcost
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Contract_11` IS NULL OR `ITEM_Contract_11` = '')",
+                'expected_and_not'  => "(`ITEM_Contract_11` IS NOT NULL AND `ITEM_Contract_11` <> '')",
+            ];
+
+            // datatype=count (usehaving=true)
+            yield [
+                'itemtype'          => \Ticket::class,
+                'search_option'     => 27, // number of followups
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Ticket_27` IS NULL OR `ITEM_Ticket_27` = '')",
+                'expected_and_not'  => "(`ITEM_Ticket_27` IS NOT NULL AND `ITEM_Ticket_27` <> '')",
+            ];
+            // log for both AND and AND NOT cases
+            if ($is_mariadb_10_2) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+            } elseif ($is_mariadb) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+            }
+
+            // datatype=mio (usehaving=true)
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 111, // memory size
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Computer_111` IS NULL OR `ITEM_Computer_111` = '')",
+                'expected_and_not'  => "(`ITEM_Computer_111` IS NOT NULL AND `ITEM_Computer_111` <> '')",
+            ];
+
+            // datatype=progressbar (with computation)
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 152, // harddrive freepercent
+                'value'             => $null_value,
+                'expected_and'      => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) IS NULL OR LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) = '')",
+                'expected_and_not'  => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) IS NOT NULL AND LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) <> '')",
+            ];
+
+            // datatype=timestamp
+            yield [
+                'itemtype'          => \CronTask::class,
+                'search_option'     => 6, // frequency
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_crontasks`.`frequency` IS NULL OR `glpi_crontasks`.`frequency` = '')",
+                'expected_and_not'  => "(`glpi_crontasks`.`frequency` IS NOT NULL AND `glpi_crontasks`.`frequency` <> '')",
+            ];
+            // log for both AND and AND NOT cases
+            if ($is_mariadb_10_2) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DOUBLE value: ''", LogLevel::WARNING);
+            } elseif ($is_mariadb) {
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+                $this->hasSqlLogRecordThatContains("Truncated incorrect DECIMAL value: ''", LogLevel::WARNING);
+            }
+
+            // datatype=timestamp (usehaving=true)
+            yield [
+                'itemtype'          => \Ticket::class,
+                'search_option'     => 49, // actiontime
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Ticket_49` IS NULL OR `ITEM_Ticket_49` = '')",
+                'expected_and_not'  => "(`ITEM_Ticket_49` IS NOT NULL AND `ITEM_Ticket_49` <> '')",
+            ];
+
+            // datatype=datetime
+            yield [
+                'itemtype'          => \Computer::class,
+                'search_option'     => 9, // last_inventory_update
+                'value'             => $null_value,
+                'expected_and'      => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) IS NULL OR CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) = '')",
+                'expected_and_not'  => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) IS NOT NULL AND CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) <> '')",
+            ];
+
+            // datatype=datetime computed field
+            yield [
+                'itemtype'          => \Ticket::class,
+                'search_option'     => 188, // next_escalation_level
+                'value'             => $null_value,
+                'expected_and'      => "(`ITEM_Ticket_188` IS NULL OR `ITEM_Ticket_188` = '')",
+                'expected_and_not'  => "(`ITEM_Ticket_188` IS NOT NULL AND `ITEM_Ticket_188` <> '')",
+            ];
+
+            // datatype=date
+            yield [
+                'itemtype'          => \Budget::class,
+                'search_option'     => 5, // begin_date
+                'value'             => $null_value,
+                'expected_and'      => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) IS NULL OR CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) = '')",
+                'expected_and_not'  => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) IS NOT NULL AND CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) <> '')",
+            ];
+
+            // datatype=date_delay
+            /*
+             * FIXME Following search fails due to the following SQL error: `Error: Incorrect DATE value: ''`.
+            yield [
+                'itemtype'          => \Contract::class,
+                'search_option'     => 20, // end_date
+                'value'             => $null_value,
+                'expected_and'      => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration ) MONTH) IS  NULL  OR ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration ) MONTH) = '')",
+                'expected_and_not'  => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration ) MONTH) IS NOT NULL  OR ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration ) MONTH) = '')",
+            ];
+            */
+
+            // datatype=email
+            yield [
+                'itemtype'          => \Contact::class,
+                'search_option'     => 6, // email
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_contacts`.`email` IS NULL OR `glpi_contacts`.`email` = '')",
+                'expected_and_not'  => "(`glpi_contacts`.`email` IS NOT NULL AND `glpi_contacts`.`email` <> '')",
+            ];
+
+            // datatype=weblink
+            yield [
+                'itemtype'          => \Document::class,
+                'search_option'     => 4, // link
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_documents`.`link` IS NULL OR `glpi_documents`.`link` = '')",
+                'expected_and_not'  => "(`glpi_documents`.`link` IS NOT NULL AND `glpi_documents`.`link` <> '')",
+            ];
+
+            // datatype=mac
+            yield [
+                'itemtype'          => \DeviceNetworkCard::class,
+                'search_option'     => 11, // mac_default
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` IS NULL OR `glpi_devicenetworkcards`.`mac_default` = '')",
+                'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` IS NOT NULL AND `glpi_devicenetworkcards`.`mac_default` <> '')",
+            ];
+
+            // datatype=color
+            yield [
+                'itemtype'          => \Cable::class,
+                'search_option'     => 15, // color
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_cables`.`color` IS NULL OR `glpi_cables`.`color` = '')",
+                'expected_and_not'  => "(`glpi_cables`.`color` IS NOT NULL AND `glpi_cables`.`color` <> '')",
+            ];
+
+            // datatype=language
+            yield [
+                'itemtype'          => \User::class,
+                'search_option'     => 17, // language
+                'value'             => $null_value,
+                'expected_and'      => "(`glpi_users`.`language` IS NULL OR `glpi_users`.`language` = '')",
+                'expected_and_not'  => "(`glpi_users`.`language` IS NOT NULL AND `glpi_users`.`language` <> '')",
+            ];
+        }
+
+        // Check `^` and `$` operators.
+        // Usage is only relevant for textual fields, so it is not tested on other fields.
+
+        // datatype=dropdown
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 4, // type
+            'value'             => '^test',
+            'expected_and'      => "(`glpi_computertypes`.`name` LIKE 'test%')",
+            'expected_and_not'  => "(`glpi_computertypes`.`name` NOT LIKE 'test%' OR `glpi_computertypes`.`name` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 4, // type
+            'value'             => 'test$',
+            'expected_and'      => "(`glpi_computertypes`.`name` LIKE '%test')",
+            'expected_and_not'  => "(`glpi_computertypes`.`name` NOT LIKE '%test' OR `glpi_computertypes`.`name` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 4, // type
+            'value'             => '^test$',
+            'expected_and'      => "(`glpi_computertypes`.`name` LIKE 'test')",
+            'expected_and_not'  => "(`glpi_computertypes`.`name` NOT LIKE 'test' OR `glpi_computertypes`.`name` IS NULL)",
+        ];
+
+        // datatype=dropdown (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 142, // document name
+            'value'             => '^test',
+            'expected_and'      => "(`ITEM_Ticket_142` LIKE 'test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_142` NOT LIKE 'test%' OR `ITEM_Ticket_142` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 142, // document name
+            'value'             => 'test$',
+            'expected_and'      => "(`ITEM_Ticket_142` LIKE '%test')",
+            'expected_and_not'  => "(`ITEM_Ticket_142` NOT LIKE '%test' OR `ITEM_Ticket_142` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 142, // document name
+            'value'             => '^test$',
+            'expected_and'      => "(`ITEM_Ticket_142` LIKE 'test')",
+            'expected_and_not'  => "(`ITEM_Ticket_142` NOT LIKE 'test' OR `ITEM_Ticket_142` IS NULL)",
+        ];
+
+        // datatype=itemlink
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 1, // name
+            'value'             => '^test',
+            'expected_and'      => "(`glpi_computers`.`name` LIKE 'test%')",
+            'expected_and_not'  => "(`glpi_computers`.`name` NOT LIKE 'test%' OR `glpi_computers`.`name` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 1, // name
+            'value'             => 'test$',
+            'expected_and'      => "(`glpi_computers`.`name` LIKE '%test')",
+            'expected_and_not'  => "(`glpi_computers`.`name` NOT LIKE '%test' OR `glpi_computers`.`name` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 1, // name
+            'value'             => '^test$',
+            'expected_and'      => "(`glpi_computers`.`name` LIKE 'test')",
+            'expected_and_not'  => "(`glpi_computers`.`name` NOT LIKE 'test' OR `glpi_computers`.`name` IS NULL)",
+        ];
+
+        // datatype=itemlink (usehaving=true)
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 50, // parent tickets
+            'value'             => '^test',
+            'expected_and'      => "(`ITEM_Ticket_50` LIKE 'test%')",
+            'expected_and_not'  => "(`ITEM_Ticket_50` NOT LIKE 'test%' OR `ITEM_Ticket_50` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 50, // parent tickets
+            'value'             => 'test$',
+            'expected_and'      => "(`ITEM_Ticket_50` LIKE '%test')",
+            'expected_and_not'  => "(`ITEM_Ticket_50` NOT LIKE '%test' OR `ITEM_Ticket_50` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Ticket::class,
+            'search_option'     => 50, // parent tickets
+            'value'             => '^test$',
+            'expected_and'      => "(`ITEM_Ticket_50` LIKE 'test')",
+            'expected_and_not'  => "(`ITEM_Ticket_50` NOT LIKE 'test' OR `ITEM_Ticket_50` IS NULL)",
+        ];
+
+        // datatype=string
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 47, // uuid
+            'value'             => '^test',
+            'expected_and'      => "(`glpi_computers`.`uuid` LIKE 'test%')",
+            'expected_and_not'  => "(`glpi_computers`.`uuid` NOT LIKE 'test%' OR `glpi_computers`.`uuid` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 47, // uuid
+            'value'             => 'test$',
+            'expected_and'      => "(`glpi_computers`.`uuid` LIKE '%test')",
+            'expected_and_not'  => "(`glpi_computers`.`uuid` NOT LIKE '%test' OR `glpi_computers`.`uuid` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 47, // uuid
+            'value'             => '^test$',
+            'expected_and'      => "(`glpi_computers`.`uuid` LIKE 'test')",
+            'expected_and_not'  => "(`glpi_computers`.`uuid` NOT LIKE 'test' OR `glpi_computers`.`uuid` IS NULL)",
+        ];
+
+        // datatype=text
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 16, // comment
+            'value'             => '^test',
+            'expected_and'      => "(`glpi_computers`.`comment` LIKE 'test%')",
+            'expected_and_not'  => "(`glpi_computers`.`comment` NOT LIKE 'test%' OR `glpi_computers`.`comment` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 16, // comment
+            'value'             => 'test$',
+            'expected_and'      => "(`glpi_computers`.`comment` LIKE '%test')",
+            'expected_and_not'  => "(`glpi_computers`.`comment` NOT LIKE '%test' OR `glpi_computers`.`comment` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Computer::class,
+            'search_option'     => 16, // comment
+            'value'             => '^test$',
+            'expected_and'      => "(`glpi_computers`.`comment` LIKE 'test')",
+            'expected_and_not'  => "(`glpi_computers`.`comment` NOT LIKE 'test' OR `glpi_computers`.`comment` IS NULL)",
+        ];
+
+        // datatype=email
+        yield [
+            'itemtype'          => \Contact::class,
+            'search_option'     => 6, // email
+            'value'             => '^myname@',
+            'expected_and'      => "(`glpi_contacts`.`email` LIKE 'myname@%')",
+            'expected_and_not'  => "(`glpi_contacts`.`email` NOT LIKE 'myname@%' OR `glpi_contacts`.`email` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Contact::class,
+            'search_option'     => 6, // email
+            'value'             => '@domain.tld$',
+            'expected_and'      => "(`glpi_contacts`.`email` LIKE '%@domain.tld')",
+            'expected_and_not'  => "(`glpi_contacts`.`email` NOT LIKE '%@domain.tld' OR `glpi_contacts`.`email` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Contact::class,
+            'search_option'     => 6, // email
+            'value'             => '^myname@domain.tld$',
+            'expected_and'      => "(`glpi_contacts`.`email` LIKE 'myname@domain.tld')",
+            'expected_and_not'  => "(`glpi_contacts`.`email` NOT LIKE 'myname@domain.tld' OR `glpi_contacts`.`email` IS NULL)",
+        ];
+
+        // datatype=weblink
+        yield [
+            'itemtype'          => \Document::class,
+            'search_option'     => 4, // link
+            'value'             => '^ftp://',
+            'expected_and'      => "(`glpi_documents`.`link` LIKE 'ftp://%')",
+            'expected_and_not'  => "(`glpi_documents`.`link` NOT LIKE 'ftp://%' OR `glpi_documents`.`link` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Document::class,
+            'search_option'     => 4, // link
+            'value'             => '.pdf$',
+            'expected_and'      => "(`glpi_documents`.`link` LIKE '%.pdf')",
+            'expected_and_not'  => "(`glpi_documents`.`link` NOT LIKE '%.pdf' OR `glpi_documents`.`link` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Document::class,
+            'search_option'     => 4, // link
+            'value'             => '^ftp://domain.tld/document.pdf$',
+            'expected_and'      => "(`glpi_documents`.`link` LIKE 'ftp://domain.tld/document.pdf')",
+            'expected_and_not'  => "(`glpi_documents`.`link` NOT LIKE 'ftp://domain.tld/document.pdf' OR `glpi_documents`.`link` IS NULL)",
+        ];
+
+        // datatype=mac
+        yield [
+            'itemtype'          => \DeviceNetworkCard::class,
+            'search_option'     => 11, // mac_default
+            'value'             => '^a2:e5:aa',
+            'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` LIKE 'a2:e5:aa%')",
+            'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` NOT LIKE 'a2:e5:aa%' OR `glpi_devicenetworkcards`.`mac_default` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \DeviceNetworkCard::class,
+            'search_option'     => 11, // mac_default
+            'value'             => 'a2:e5:aa$',
+            'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` LIKE '%a2:e5:aa')",
+            'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` NOT LIKE '%a2:e5:aa' OR `glpi_devicenetworkcards`.`mac_default` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \DeviceNetworkCard::class,
+            'search_option'     => 11, // mac_default
+            'value'             => '^15:f4:q4:a2:e5:aa$',
+            'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` LIKE '15:f4:q4:a2:e5:aa')",
+            'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` NOT LIKE '15:f4:q4:a2:e5:aa' OR `glpi_devicenetworkcards`.`mac_default` IS NULL)",
+        ];
+
+        // datatype=color
+        yield [
+            'itemtype'          => \Cable::class,
+            'search_option'     => 15, // color
+            'value'             => '^#00',
+            'expected_and'      => "(`glpi_cables`.`color` LIKE '#00%')",
+            'expected_and_not'  => "(`glpi_cables`.`color` NOT LIKE '#00%' OR `glpi_cables`.`color` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Cable::class,
+            'search_option'     => 15, // color
+            'value'             => 'ff$',
+            'expected_and'      => "(`glpi_cables`.`color` LIKE '%ff')",
+            'expected_and_not'  => "(`glpi_cables`.`color` NOT LIKE '%ff' OR `glpi_cables`.`color` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \Cable::class,
+            'search_option'     => 15, // color
+            'value'             => '^#00aaff$',
+            'expected_and'      => "(`glpi_cables`.`color` LIKE '#00aaff')",
+            'expected_and_not'  => "(`glpi_cables`.`color` NOT LIKE '#00aaff' OR `glpi_cables`.`color` IS NULL)",
+        ];
+
+        // datatype=language
+        yield [
+            'itemtype'          => \User::class,
+            'search_option'     => 17, // language
+            'value'             => '^en_',
+            'expected_and'      => "(`glpi_users`.`language` LIKE 'en\_%')",
+            'expected_and_not'  => "(`glpi_users`.`language` NOT LIKE 'en\_%' OR `glpi_users`.`language` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \User::class,
+            'search_option'     => 17, // language
+            'value'             => '_GB$',
+            'expected_and'      => "(`glpi_users`.`language` LIKE '%\_GB')",
+            'expected_and_not'  => "(`glpi_users`.`language` NOT LIKE '%\_GB' OR `glpi_users`.`language` IS NULL)",
+        ];
+        yield [
+            'itemtype'          => \User::class,
+            'search_option'     => 17, // language
+            'value'             => '^en_GB$',
+            'expected_and'      => "(`glpi_users`.`language` LIKE 'en\_GB')",
+            'expected_and_not'  => "(`glpi_users`.`language` NOT LIKE 'en\_GB' OR `glpi_users`.`language` IS NULL)",
+        ];
+
+        // Check `>`, `>=`, `<` and `<=` operators on textual fields.
+        // Operator has no meaning and is considered as a term to search for.
+        foreach (['>', '>=', '<', '<='] as $operator) {
+            foreach (['', ' '] as $spacing) {
+                $searched_value = "{$operator}{$spacing}15";
+
+                // datatype=dropdown
+                yield [
+                    'itemtype'          => \Computer::class,
+                    'search_option'     => 4, // type
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_computertypes`.`name` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_computertypes`.`name` NOT LIKE '%{$searched_value}%' OR `glpi_computertypes`.`name` IS NULL)",
+                ];
+
+                // datatype=dropdown (usehaving=true)
+                yield [
+                    'itemtype'          => \Ticket::class,
+                    'search_option'     => 142, // document name
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`ITEM_Ticket_142` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`ITEM_Ticket_142` NOT LIKE '%{$searched_value}%' OR `ITEM_Ticket_142` IS NULL)",
+                ];
+
+                // datatype=itemlink
+                yield [
+                    'itemtype'          => \Computer::class,
+                    'search_option'     => 1, // name
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_computers`.`name` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_computers`.`name` NOT LIKE '%{$searched_value}%' OR `glpi_computers`.`name` IS NULL)",
+                ];
+
+                // datatype=itemlink (usehaving=true)
+                yield [
+                    'itemtype'          => \Ticket::class,
+                    'search_option'     => 50, // parent tickets
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`ITEM_Ticket_50` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`ITEM_Ticket_50` NOT LIKE '%{$searched_value}%' OR `ITEM_Ticket_50` IS NULL)",
+                ];
+
+                // datatype=string
+                yield [
+                    'itemtype'          => \Computer::class,
+                    'search_option'     => 47, // uuid
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_computers`.`uuid` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_computers`.`uuid` NOT LIKE '%{$searched_value}%' OR `glpi_computers`.`uuid` IS NULL)",
+                ];
+
+                // datatype=text
+                yield [
+                    'itemtype'          => \Computer::class,
+                    'search_option'     => 16, // comment
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_computers`.`comment` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_computers`.`comment` NOT LIKE '%{$searched_value}%' OR `glpi_computers`.`comment` IS NULL)",
+                ];
+
+                // datatype=email
+                yield [
+                    'itemtype'          => \Contact::class,
+                    'search_option'     => 6, // email
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_contacts`.`email` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_contacts`.`email` NOT LIKE '%{$searched_value}%' OR `glpi_contacts`.`email` IS NULL)",
+                ];
+
+                // datatype=weblink
+                yield [
+                    'itemtype'          => \Document::class,
+                    'search_option'     => 4, // link
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_documents`.`link` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_documents`.`link` NOT LIKE '%{$searched_value}%' OR `glpi_documents`.`link` IS NULL)",
+                ];
+
+                // datatype=mac
+                yield [
+                    'itemtype'          => \DeviceNetworkCard::class,
+                    'search_option'     => 11, // mac_default
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_devicenetworkcards`.`mac_default` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_devicenetworkcards`.`mac_default` NOT LIKE '%{$searched_value}%' OR `glpi_devicenetworkcards`.`mac_default` IS NULL)",
+                ];
+
+                // datatype=color
+                yield [
+                    'itemtype'          => \Cable::class,
+                    'search_option'     => 15, // color
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_cables`.`color` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_cables`.`color` NOT LIKE '%{$searched_value}%' OR `glpi_cables`.`color` IS NULL)",
+                ];
+
+                // datatype=language
+                yield [
+                    'itemtype'          => \User::class,
+                    'search_option'     => 17, // language
+                    'value'             => $searched_value,
+                    'expected_and'      => "(`glpi_users`.`language` LIKE '%{$searched_value}%')",
+                    'expected_and_not'  => "(`glpi_users`.`language` NOT LIKE '%{$searched_value}%' OR `glpi_users`.`language` IS NULL)",
+                ];
+            }
+        }
+
+        // Check `>`, `>=`, `<` and `<=` operators on numeric fields.
+        // It should result in usage of the corresponding SQL operator.
+
+        foreach (['>', '>=', '<', '<='] as $operator) {
+            foreach ([15, 2.3, 1.125] as $value) {
+                $searched_values = [
+                    // positive values, with or without spaces
+                    "{$operator}{$value}"       => "{$value}",
+                    " {$operator}  {$value} "   => "{$value}",
+
+                    // negative values, with or without spaces
+                    "{$operator}-{$value}"      => "-{$value}",
+                    " {$operator} -{$value} "   => "-{$value}",
+                    "{$operator} - {$value} "   => "-{$value}",
+                ];
+                $not_operator   = str_contains($operator, '>') ? str_replace('>', '<', $operator) : str_replace('<', '>', $operator);
+
+                foreach ($searched_values as $searched_value => $signed_value) {
+                    // datatype=integer
+                    yield [
+                        'itemtype'          => \AuthLDAP::class,
+                        'search_option'     => 4, // port
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`glpi_authldaps`.`port` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`glpi_authldaps`.`port` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=number
+                    yield [
+                        'itemtype'          => \AuthLDAP::class,
+                        'search_option'     => 32, // timeout
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`glpi_authldaps`.`timeout` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`glpi_authldaps`.`timeout` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=number (usehaving=true)
+                    yield [
+                        'itemtype'          => \Computer::class,
+                        'search_option'     => 115, // harddrive capacity
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`ITEM_Computer_115` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`ITEM_Computer_115` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=decimal
+                    yield [
+                        'itemtype'          => \Budget::class,
+                        'search_option'     => 7, // value
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`glpi_budgets`.`value` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`glpi_budgets`.`value` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=decimal (usehaving=true)
+                    yield [
+                        'itemtype'          => \Contract::class,
+                        'search_option'     => 11, // totalcost
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`ITEM_Contract_11` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`ITEM_Contract_11` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=count (usehaving=true)
+                    yield [
+                        'itemtype'          => \Ticket::class,
+                        'search_option'     => 27, // number of followups
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`ITEM_Ticket_27` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`ITEM_Ticket_27` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=mio (usehaving=true)
+                    yield [
+                        'itemtype'          => \Computer::class,
+                        'search_option'     => 111, // memory size
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`ITEM_Computer_111` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`ITEM_Computer_111` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=progressbar (with computation)
+                    yield [
+                        'itemtype'          => \Computer::class,
+                        'search_option'     => 152, // harddrive freepercent
+                        'value'             => $searched_value,
+                        'expected_and'      => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) {$operator} {$signed_value})",
+                        'expected_and_not'  => "(LPAD(ROUND(100*`glpi_items_disks`.freesize/NULLIF(`glpi_items_disks`.totalsize, 0)), 3, 0) {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=timestamp
+                    yield [
+                        'itemtype'          => \CronTask::class,
+                        'search_option'     => 6, // frequency
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`glpi_crontasks`.`frequency` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`glpi_crontasks`.`frequency` {$not_operator} {$signed_value})",
+                    ];
+
+                    // datatype=timestamp (usehaving=true)
+                    yield [
+                        'itemtype'          => \Ticket::class,
+                        'search_option'     => 49, // actiontime
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`ITEM_Ticket_49` {$operator} {$signed_value})",
+                        'expected_and_not'  => "(`ITEM_Ticket_49` {$not_operator} {$signed_value})",
+                    ];
+                }
+            }
+        }
+
+        // Check `>`, `>=`, `<` and `<=` operators on date and datetime fields.
+        // It should result in a criterion based on a relative date expressed in months, and using the corresponding SQL operator.
+
+        foreach (['>', '>=', '<', '<='] as $operator) {
+            foreach ([3, 6.5] as $value) {
+                $searched_values = [
+                    // positive values, with or without spaces
+                    "{$operator}{$value}"       => "{$value}",
+                    " {$operator}  {$value} "   => "{$value}",
+
+                    // negative values, with or without spaces
+                    "{$operator}-{$value}"      => "-{$value}",
+                    " {$operator} -{$value} "   => "-{$value}",
+                    "{$operator} - {$value} "   => "-{$value}",
+                ];
+                $not_operator   = str_contains($operator, '>') ? str_replace('>', '<', $operator) : str_replace('<', '>', $operator);
+
+                foreach ($searched_values as $searched_value => $signed_value) {
+                    // datatype=datetime
+                    yield [
+                        'itemtype'          => \Computer::class,
+                        'search_option'     => 9, // last_inventory_update
+                        'value'             => $searched_value,
+                        'expected_and'      => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) {$operator} ADDDATE(NOW(), INTERVAL {$signed_value} MONTH))",
+                        'expected_and_not'  => "(CONVERT(`glpi_computers`.`last_inventory_update` USING utf8mb4) {$not_operator} ADDDATE(NOW(), INTERVAL {$signed_value} MONTH))",
+                    ];
+
+                    // datatype=datetime computed field
+                    $like_value = trim(str_replace('  ', ' ', $searched_value));
+                    yield [
+                        'itemtype'          => \Ticket::class,
+                        'search_option'     => 188, // next_escalation_level
+                        'value'             => $searched_value,
+                        'expected_and'      => "(`ITEM_Ticket_188` LIKE '%{$like_value}%')",
+                        'expected_and_not'  => "(`ITEM_Ticket_188` NOT LIKE '%{$like_value}%' OR `ITEM_Ticket_188` IS NULL)",
+                    ];
+
+                    // datatype=date
+                    yield [
+                        'itemtype'          => \Budget::class,
+                        'search_option'     => 5, // begin_date
+                        'value'             => $searched_value,
+                        'expected_and'      => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) {$operator} ADDDATE(NOW(), INTERVAL {$signed_value} MONTH))",
+                        'expected_and_not'  => "(CONVERT(`glpi_budgets`.`begin_date` USING utf8mb4) {$not_operator} ADDDATE(NOW(), INTERVAL {$signed_value} MONTH))",
+                    ];
+
+                    // datatype=date_delay
+                    yield [
+                        'itemtype'          => \Contract::class,
+                        'search_option'     => 20, // end_date
+                        'value'             => $searched_value,
+                        'expected_and'      => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) {$operator} ADDDATE(NOW(), INTERVAL {$signed_value} MONTH))",
+                        'expected_and_not'  => "(ADDDATE(`glpi_contracts`.begin_date, INTERVAL (`glpi_contracts`.duration) MONTH) {$not_operator} ADDDATE(NOW(), INTERVAL {$signed_value} MONTH))",
+                    ];
+                }
+            }
+        }
+    }
+
+    /**
+     * @dataprovider containsCriterionProvider
+     */
+    public function testContainsCriterion(
+        string $itemtype,
+        int $search_option,
+        string $value,
+        string $expected_and,
+        string $expected_and_not
+    ): void {
+        $cases = [
+            'AND'       => $expected_and,
+            'AND NOT'   => $expected_and_not,
+        ];
+
+        foreach ($cases as $link => $expected_where) {
+            $search_params = [
+                'is_deleted' => 0,
+                'start'      => 0,
+                'criteria'   => [
+                    0 => [
+                        'link'       => $link,
+                        'field'      => $search_option,
+                        'searchtype' => 'contains',
+                        'value'      => $value,
+                    ]
+                ],
+            ];
+
+            $data = $this->doSearch($itemtype, $search_params);
+
+            $this->array($data)->hasKey('sql');
+            $this->array($data['sql'])->hasKey('search');
+            $this->string($data['sql']['search']);
+
+            $this->string($this->cleanSQL($data['sql']['search']))->contains($expected_where);
+        }
+    }
+
+    public function testDCRoomSearchOption()
+    {
+        global $CFG_GLPI;
+        foreach ($CFG_GLPI['rackable_types'] as $rackable_type) {
+            $item = new $rackable_type();
+            $so = $item->rawSearchOptions();
+            //check if search option separator 'dcroom' exist
+            $this->variable(array_search('dcroom', array_column($so, 'id')))->isNotEqualTo(false, $item->getTypeName() . ' should use \'$tab = array_merge($tab, DCRoom::rawSearchOptionsToAdd());');
+        }
+    }
+
+    public function testDataCenterSearchOption()
+    {
+        global $CFG_GLPI;
+        foreach ($CFG_GLPI['rackable_types'] as $rackable_type) {
+            $item = new $rackable_type();
+            $so = $item->rawSearchOptions();
+            //check if search option separator 'datacenter' exist
+            $this->variable(array_search('datacenter', array_column($so, 'id')))->isNotEqualTo(false, $item->getTypeName() . ' should use \'$tab = array_merge($tab, DataCenter::rawSearchOptionsToAdd());');
+        }
+    }
+
+    protected function testRichTextProvider(): iterable
+    {
+        $this->login('glpi', 'glpi');
+
+        $this->createItems('Ticket', [
+            [
+                'name' => 'Ticket 1',
+                'content' => '<p>This is a test ticket</p>'
+            ],
+            [
+                'name' => 'Ticket 2',
+                'content' => '<p>This is a test ticket with &amp; in description</p>'
+            ],
+            [
+                'name' => 'Ticket 3',
+                'content' => '<p>This is a test ticket with matching followup</p>'
+            ],
+            [
+                'name' => 'Ticket 4',
+                'content' => '<p>This is a test ticket with task</p>'
+            ],
+            [
+                'name' => 'Ticket & 5',
+                'content' => '<p>This is a test ticket</p>'
+            ],
+            [
+                'name' => 'Ticket > 6',
+                'content' => '<p>This is a test ticket</p>'
+            ],
+        ]);
+
+        $this->createItem('ITILFollowup', [
+            'itemtype' => 'Ticket',
+            'items_id' => getItemByTypeName('Ticket', 'Ticket 1')->getID(),
+            'content' => '<p>This is a followup</p>'
+        ]);
+        $this->createItem('ITILFollowup', [
+            'itemtype' => 'Ticket',
+            'items_id' => getItemByTypeName('Ticket', 'Ticket 3')->getID(),
+            'content' => '<p>This is a followup with &amp; in description</p>'
+        ]);
+
+        $this->createItem('TicketTask', [
+            'tickets_id' => getItemByTypeName('Ticket', 'Ticket 1')->getID(),
+            'content' => '<p>This is a task</p>'
+        ]);
+        $this->createItem('TicketTask', [
+            'tickets_id' => getItemByTypeName('Ticket', 'Ticket 4')->getID(),
+            'content' => '<p>This is a task with &amp; in description</p>'
+        ]);
+
+        // When user searches for a `&`, the criteria is sanitized and its value is therefore `&#38;`
+        $sanitized_ampersand_criteria = '&#38;';
+
+        yield [
+            'search_params' => [
+                'is_deleted' => 0,
+                'start'      => 0,
+                'criteria'   => [
+                    0 => [
+                        'link'       => 'AND',
+                        'field'      => 1, // title
+                        'searchtype' => 'contains',
+                        'value'      => $sanitized_ampersand_criteria
+                    ]
+                ],
+            ],
+            'expected' => [
+                'Ticket &#38; 5'
+            ]
+        ];
+
+        yield [
+            'search_params' => [
+                'is_deleted' => 0,
+                'start'      => 0,
+                'criteria'   => [
+                    0 => [
+                        'link'       => 'AND',
+                        'field'      => 21, // ticket content
+                        'searchtype' => 'contains',
+                        'value'      => $sanitized_ampersand_criteria
+                    ]
+                ],
+            ],
+            'expected' => [
+                'Ticket 2'
+            ]
+        ];
+
+        yield [
+            'search_params' => [
+                'is_deleted' => 0,
+                'start'      => 0,
+                'criteria'   => [
+                    0 => [
+                        'link'       => 'AND',
+                        'field'      => 25, // followup content
+                        'searchtype' => 'contains',
+                        'value'      => $sanitized_ampersand_criteria
+                    ]
+                ],
+            ],
+            'expected' => [
+                'Ticket 3'
+            ]
+        ];
+
+        yield [
+            'search_params' => [
+                'is_deleted' => 0,
+                'start'      => 0,
+                'criteria'   => [
+                    0 => [
+                        'link'       => 'AND',
+                        'field'      => 26, // task content
+                        'searchtype' => 'contains',
+                        'value'      => $sanitized_ampersand_criteria
+                    ]
+                ],
+            ],
+            'expected' => [
+                'Ticket 4'
+            ]
+        ];
+
+        yield [
+            'search_params' => [
+                'is_deleted' => 0,
+                'start' => 0,
+                'criteria' => [
+                    0 => [
+                        'link' => 'AND',
+                        'field' => 'view', // items seen
+                        'searchtype' => 'contains',
+                        'value' => $sanitized_ampersand_criteria
+                    ],
+                    1 => [
+                        'link' => 'AND',
+                        'field' => 1, //title
+                        'searchtype' => 'contains',
+                        'value' => ''
+                    ],
+                    2 => [
+                        'link' => 'AND',
+                        'field' => 21, // ticket content
+                        'searchtype' => 'contains',
+                        'value' => ''
+                    ],
+                    3 => [
+                        'link' => 'AND',
+                        'field' => 25, // followup content
+                        'searchtype' => 'contains',
+                        'value' => ''
+                    ],
+                    4 => [
+                        'link' => 'AND',
+                        'field' => 26, // task content
+                        'searchtype' => 'contains',
+                        'value' => ''
+                    ],
+                ],
+            ],
+            'expected' => [
+                'Ticket 2',
+                'Ticket 3',
+                'Ticket 4',
+                'Ticket &#38; 5'
+            ]
+        ];
+    }
+
+    /**
+     * @dataprovider testRichTextProvider
+     */
+    public function testRichText(
+        array $search_params,
+        array $expected
+    ): void {
+        $data = $this->doSearch(\Ticket::class, $search_params);
+
+        // Extract items names
+        $items = [];
+        foreach ($data['data']['rows'] as $row) {
+            $items[] = $row['raw']['ITEM_Ticket_1'];
+        }
+
+        $this->array($items)->isEqualTo($expected);
+    }
+
+    public function testTicketValidationStatus()
+    {
+        $search_params = [
+            'reset'        => 'reset',
+            'is_deleted'   => 0,
+            'start'        => 0,
+            'search'       => 'Search',
+            'criteria'     => [
+                0 => [
+                    'field' => 'view', // items seen
+                    'searchtype' => 'contains',
+                    'value' => 'any string'
+                ]
+            ]
+        ];
+
+        $displaypref = new \DisplayPreference();
+        $input = [
+            'itemtype'  => 'Ticket',
+            'users_id'  => \Session::getLoginUserID(),
+            'num'       => 55, //Ticket glpi_ticketvalidations.status
+        ];
+        $this->integer((int)$displaypref->add($input))->isGreaterThan(0);
+
+
+        $data = $this->doSearch('Ticket', $search_params);
+
+        $this->string($data['sql']['search'])->notContains("`glpi_ticketvalidations`.`status` IN");
+
+        $search_params['criteria'][0]['value'] = 1;
+        $data = $this->doSearch('Ticket', $search_params);
+        $this->string($data['sql']['search'])->contains("`glpi_ticketvalidations`.`status` IN");
+
+        $search_params['criteria'][0]['value'] = 'all';
+        $data = $this->doSearch('Ticket', $search_params);
+        $this->string($data['sql']['search'])->notContains("`glpi_ticketvalidations`.`status` IN");
+
+        $search_params['criteria'][0]['value'] = 'can';
+        $data = $this->doSearch('Ticket', $search_params);
+        $this->string($data['sql']['search'])->contains("`glpi_ticketvalidations`.`status` IN");
     }
 }
 

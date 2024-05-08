@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -114,6 +114,7 @@ class Planning extends CommonGLPI
 
     public static function getAdditionalMenuLinks()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $links = [];
@@ -245,7 +246,75 @@ class Planning extends CommonGLPI
 
             case static::DONE:
                 return __('Done');
+
+            default:
+                return '';
         }
+    }
+
+
+    /**
+     * Get status icon
+     *
+     * @since 10.0.9
+     *
+     * @return string
+     */
+    public static function getStatusIcon($status): string
+    {
+        $label = htmlspecialchars(Planning::getState($status), ENT_QUOTES);
+        if (empty($label)) {
+            return '';
+        }
+        $class = Planning::getStatusClass($status);
+        $color = Planning::getStatusColor($status);
+        return "<i class='itilstatus $class $color me-1' title='$label' data-bs-toggle='tooltip'></i><span>" . $label . "</span>";
+    }
+
+
+    /**
+     * Get status class
+     *
+     * @since 10.0.9
+     *
+     * @return string
+     */
+    public static function getStatusClass($status): string
+    {
+        switch ($status) {
+            case Planning::INFO:
+                return "ti ti-info-square-filled";
+
+            case Planning::TODO:
+                return "ti ti-alert-square-filled";
+
+            case Planning::DONE:
+                return "ti ti-square-check-filled";
+        }
+        return '';
+    }
+
+
+    /**
+     * Get status color
+     *
+     * @since 10.0.9
+     *
+     * @return string
+     */
+    public static function getStatusColor($status): string
+    {
+        switch ($status) {
+            case Planning::INFO:
+                return "planned";
+
+            case Planning::TODO:
+                return "waiting";
+
+            case Planning::DONE:
+                return "new";
+        }
+        return '';
     }
 
 
@@ -260,14 +329,46 @@ class Planning extends CommonGLPI
     public static function dropdownState($name, $value = '', $display = true, $options = [])
     {
 
+
+        $js = <<<JAVASCRIPT
+        templateTaskStatus = function(option) {
+            if (option === false) {
+                // Option is false when element does not match searched terms
+                return null;
+            }
+            var status = option.id;
+            var classes = "";
+            switch (parseInt(status)) {
+                case 0 :
+                    classes = 'planned ti ti-info-square-filled';
+                    break;
+                case 1 :
+                    classes = 'waiting ti ti-alert-square-filled';
+                    break;
+                case 2 :
+                    classes = 'new ti ti-square-check-filled';
+                    break;
+
+            }
+            return $('<span><i class="itilstatus ' + classes + '"></i> ' + option.text + '</span>');
+        }
+JAVASCRIPT;
+
+
+        $p = [
+            'value'             => $value,
+            'showtype'          => 'normal',
+            'display'           => $display,
+            'templateResult'    => $js,
+            'templateSelection' => $js,
+        ];
+
         $values = [static::INFO => _n('Information', 'Information', 1),
             static::TODO => __('To do'),
             static::DONE => __('Done')
         ];
 
-        return Dropdown::showFromArray($name, $values, array_merge(['value'   => $value,
-            'display' => $display
-        ], $options));
+        return Dropdown::showFromArray($name, $values, array_merge($p, $options));
     }
 
 
@@ -281,6 +382,7 @@ class Planning extends CommonGLPI
      **/
     public static function checkAlreadyPlanned($users_id, $begin, $end, $except = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $planned = false;
@@ -353,6 +455,7 @@ class Planning extends CommonGLPI
      **/
     public static function checkAvailability($params = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!isset($params['itemtype'])) {
@@ -420,7 +523,7 @@ class Planning extends CommonGLPI
                     $task = new ProblemTask();
                 }
                 if ($task->getFromDBByCrit(['tickets_id' => $item->fields['id']])) {
-                    $users['users_id'] = getUserName($task->fields['users_id_tech']);
+                    $users[$task->fields['users_id_tech']] = getUserName($task->fields['users_id_tech']);
                     $group_id = $task->fields['groups_id_tech'];
                     if ($group_id) {
                         foreach (Group_User::getGroupUsers($group_id) as $data2) {
@@ -795,6 +898,7 @@ class Planning extends CommonGLPI
 
     public static function getPlanningTypes()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         return array_merge(
@@ -864,6 +968,7 @@ class Planning extends CommonGLPI
      */
     public static function showPlanningFilter()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $headings = ['filters'    => __("Events type"),
@@ -922,6 +1027,7 @@ class Planning extends CommonGLPI
      */
     public static function showSingleLinePlanningFilter($filter_key, $filter_data, $options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
        // Invalid data, skip
@@ -946,14 +1052,18 @@ class Planning extends CommonGLPI
         if ($filter_data['type'] == 'user') {
             $uID = $actor[1];
             $user = new User();
-            $user->getFromDB($actor[1]);
-            $title = $user->getName();
-            $caldav_item_url = self::getCaldavBaseCalendarUrl($user);
+            $user_exists = $user->getFromDB($actor[1]);
+            $title = $user->getName(); // Will return N/A if it doesn't exist anymore
+            if ($user_exists) {
+                $caldav_item_url = self::getCaldavBaseCalendarUrl($user);
+            }
         } else if ($filter_data['type'] == 'group_users') {
             $group = new Group();
-            $group->getFromDB($actor[1]);
-            $title = $group->getName();
-            $caldav_item_url = self::getCaldavBaseCalendarUrl($group);
+            $group_exists = $group->getFromDB($actor[1]);
+            $title = $group->getName(); // Will return N/A if it doesn't exist anymore
+            if ($group_exists) {
+                $caldav_item_url = self::getCaldavBaseCalendarUrl($group);
+            }
             $enabled = $disabled = 0;
             foreach ($filter_data['users'] as $user) {
                 if ($user['display']) {
@@ -969,9 +1079,11 @@ class Planning extends CommonGLPI
         } else if ($filter_data['type'] == 'group') {
             $gID = $actor[1];
             $group = new Group();
-            $group->getFromDB($actor[1]);
-            $title = $group->getName();
-            $caldav_item_url = self::getCaldavBaseCalendarUrl($group);
+            $group_exists = $group->getFromDB($actor[1]);
+            $title = $group->getName(); // Will return N/A if it doesn't exist anymore
+            if ($group_exists) {
+                $caldav_item_url = self::getCaldavBaseCalendarUrl($group);
+            }
         } else if ($filter_data['type'] == 'external') {
             $title = $filter_data['name'];
         } else if ($filter_data['type'] == 'event_filter') {
@@ -1048,7 +1160,7 @@ class Planning extends CommonGLPI
             if ($params['show_delete']) {
                 echo "<li class='delete_planning dropdown-item' value='$filter_key'>" . __("Delete") . "</li>";
             }
-            if ($filter_data['type'] != 'group_users' && $filter_data['type'] != 'external') {
+            if ($caldav_item_url !== '' && $filter_data['type'] != 'group_users' && $filter_data['type'] != 'external') {
                 $url = parse_url($CFG_GLPI["url_base"]);
                 $port = 80;
                 if (isset($url['port'])) {
@@ -1089,7 +1201,7 @@ class Planning extends CommonGLPI
         }
         echo "</span>";
 
-        if ($filter_data['type'] == 'group_users') {
+        if ($caldav_item_url !== '' && $filter_data['type'] == 'group_users') {
             echo "<ul class='group_listofusers filters'>";
             foreach ($filter_data['users'] as $user_key => $userdata) {
                 self::showSingleLinePlanningFilter(
@@ -1114,6 +1226,7 @@ class Planning extends CommonGLPI
      */
     public static function showAddPlanningForm()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $rand = mt_rand();
@@ -1199,6 +1312,10 @@ class Planning extends CommonGLPI
      */
     public static function sendAddUserForm($params = [])
     {
+        if (!isset($params['users_id']) || (int) $params['users_id'] <= 0) {
+            Session::addMessageAfterRedirect(__('A user selection is required'), false, ERROR);
+            return;
+        }
         $_SESSION['glpi_plannings']['plannings']["user_" . $params['users_id']]
          = ['color'   => self::getPaletteColor('bg', $_SESSION['glpi_plannings_color_index']),
              'display' => true,
@@ -1219,7 +1336,7 @@ class Planning extends CommonGLPI
     {
         echo Group::getTypeName(1) . " : <br>";
 
-        $condition = ['is_task' => 1];
+        $condition = [];
        // filter groups
         if (!Session::haveRight('planning', self::READALL)) {
             $condition['id'] = $_SESSION['glpigroups'];
@@ -1245,6 +1362,10 @@ class Planning extends CommonGLPI
      */
     public static function sendAddGroupUsersForm($params = [])
     {
+        if (!isset($params['groups_id']) || (int) $params['groups_id'] <= 0) {
+            Session::addMessageAfterRedirect(__('A group selection is required'), false, ERROR);
+            return;
+        }
         $current_group = &$_SESSION['glpi_plannings']['plannings']["group_" . $params['groups_id'] . "_users"];
         $current_group = ['display' => true,
             'type'    => 'group_users',
@@ -1348,6 +1469,10 @@ class Planning extends CommonGLPI
      */
     public static function sendAddGroupForm($params = [])
     {
+        if (!isset($params['groups_id']) || (int) $params['groups_id'] <= 0) {
+            Session::addMessageAfterRedirect(__('A group selection is required'), false, ERROR);
+            return;
+        }
         $_SESSION['glpi_plannings']['plannings']["group_" . $params['groups_id']]
          = ['color'   => self::getPaletteColor(
              'bg',
@@ -1407,6 +1532,10 @@ class Planning extends CommonGLPI
      */
     public static function sendAddExternalForm($params = [])
     {
+        if (empty($params['url'])) {
+            Session::addMessageAfterRedirect(__('A url is required'), false, ERROR);
+            return;
+        }
         $raw_url = Sanitizer::decodeHtmlSpecialChars($params['url']);
         if (!Toolbox::isUrlSafe($raw_url)) {
             Session::addMessageAfterRedirect(
@@ -1431,6 +1560,7 @@ class Planning extends CommonGLPI
 
     public static function showAddEventForm($params = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (count($CFG_GLPI['planning_add_types']) == 1) {
@@ -1523,6 +1653,7 @@ class Planning extends CommonGLPI
      */
     public static function showAddEventClassicForm($params = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (isset($params["id"]) && ($params["id"] > 0)) {
@@ -1861,6 +1992,7 @@ class Planning extends CommonGLPI
      */
     public static function constructEventsArray($options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $param['start']               = '';
@@ -2486,6 +2618,7 @@ class Planning extends CommonGLPI
      **/
     public static function showCentral($who)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (
@@ -2528,6 +2661,7 @@ class Planning extends CommonGLPI
      **/
     public static function generateIcal($who, $whogroup, $limititemtype = '')
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -60,6 +60,10 @@ abstract class NotificationEventAbstract implements NotificationEventInterface
         $notify_me,
         $emitter = null
     ) {
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
         global $CFG_GLPI, $DB;
         if ($CFG_GLPI['notifications_' . $options['mode']]) {
             $entity = $notificationtarget->getEntity();

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -43,6 +43,7 @@ use Glpi\Features\DCBreadcrumb;
 use Glpi\Features\Kanban;
 use Glpi\Features\PlanningEvent;
 use Glpi\Toolbox\Sanitizer;
+use Glpi\Toolbox\VersionParser;
 use ITILFollowup;
 use stdClass;
 use Ticket;
@@ -143,11 +144,14 @@ class Toolbox extends DbTestCase
     public function dataGetSize()
     {
         return [
-            [1,                   '1 o'],
-            [1025,                '1 Kio'],
-            [1100000,             '1.05 Mio'],
-            [1100000000,          '1.02 Gio'],
-            [1100000000000,       '1 Tio'],
+            [1,                                  '1 o'],
+            [1025,                               '1 Kio'],
+            [1100000,                            '1.05 Mio'],
+            [1100000000,                         '1.02 Gio'],
+            [1100000000000,                      '1 Tio'],
+            [1100000000000 * 1024,               '1 Pio'],
+            [1100000000000 * 1024 * 1024,        '1 Eio'],
+            [1100000000000 * 1024 * 1024 * 1024, '1 Zio'],
         ];
     }
 
@@ -1069,6 +1073,36 @@ class Toolbox extends DbTestCase
          ->withType(E_USER_DEPRECATED)
          ->withMessage('Calling this function is deprecated')
          ->exists();
+
+        // Test planned deprecation in the past
+        $this->when(
+            function () {
+                \Toolbox::deprecated('Calling this function is deprecated', true, '10.0');
+            }
+        )->error()
+            ->withType(E_USER_DEPRECATED)
+            ->withMessage('Calling this function is deprecated')
+            ->exists();
+
+        // Test planned deprecation in current version
+        $this->when(
+            function () {
+                \Toolbox::deprecated('Calling this function is deprecated', true, GLPI_VERSION);
+            }
+        )->error()
+            ->withType(E_USER_DEPRECATED)
+            ->withMessage('Calling this function is deprecated')
+            ->exists();
+
+        // Test planned deprecation in the future
+        $this->when(
+            function () {
+                \Toolbox::deprecated('Calling this function is deprecated', true, '99.0');
+            }
+        )->error()
+            ->withType(E_USER_DEPRECATED)
+            ->withMessage('Calling this function is deprecated')
+            ->notExists();
     }
 
     public function hasTraitProvider()

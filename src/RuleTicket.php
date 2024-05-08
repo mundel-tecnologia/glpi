@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -567,6 +567,7 @@ class RuleTicket extends Rule
         $criterias['itilcategories_id']['name']               = _n('Category', 'Categories', 1);
         $criterias['itilcategories_id']['linkfield']          = 'itilcategories_id';
         $criterias['itilcategories_id']['type']               = 'dropdown';
+        $criterias['itilcategories_id']['linked_criteria']    = 'itilcategories_id_code';
 
         $criterias['itilcategories_id_code']['table']              = 'glpi_itilcategories';
         $criterias['itilcategories_id_code']['field']              = 'code';

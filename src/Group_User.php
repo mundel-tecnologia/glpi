@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -78,6 +78,7 @@ class Group_User extends CommonDBRelation
      **/
     public static function getUserGroups($users_id, $condition = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $groups = [];
@@ -124,6 +125,7 @@ class Group_User extends CommonDBRelation
      **/
     public static function getGroupUsers($groups_id, $condition = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $users = [];
@@ -165,6 +167,7 @@ class Group_User extends CommonDBRelation
      **/
     public static function showForUser(User $user)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $ID = $user->fields['id'];
@@ -199,11 +202,10 @@ class Group_User extends CommonDBRelation
             echo "<input type='hidden' name='users_id' value='$ID'>";
 
             $params = [
-                'used'      => $used,
                 'condition' => [
                     'is_usergroup' => 1,
                 ] + getEntitiesRestrictCriteria(Group::getTable(), '', '', true)
-            ];
+            ] + ['NOT' => self::getListForItemParams($user)];
             Group::dropdown($params);
             echo "</td><td>" . _n('Manager', 'Managers', 1) . "</td><td>";
             Dropdown::showYesNo('is_manager');
@@ -379,6 +381,7 @@ class Group_User extends CommonDBRelation
         $tree = 0,
         bool $check_entities = true
     ) {
+        /** @var \DBmysql $DB */
         global $DB;
 
         // Entity restriction for this group, according to user allowed entities
@@ -472,6 +475,7 @@ class Group_User extends CommonDBRelation
      **/
     public static function showForGroup(Group $group)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $ID = $group->getID();
@@ -855,6 +859,7 @@ class Group_User extends CommonDBRelation
 
     public function post_addItem()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         parent::post_addItem();
@@ -916,6 +921,7 @@ class Group_User extends CommonDBRelation
 
     public function post_purgeItem()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         parent::post_purgeItem();

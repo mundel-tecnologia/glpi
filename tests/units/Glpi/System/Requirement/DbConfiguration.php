@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -247,7 +247,7 @@ class DbConfiguration extends \GLPITestCase
         $this->mockGenerator->orphanize('__construct');
         $db = new \mock\DB();
         $this->calling($db)->getVersion = $version;
-        $this->calling($db)->query = function ($query) use ($that, $variables) {
+        $this->calling($db)->doQuery = function ($query) use ($that, $variables) {
             $matches = [];
             if (preg_match_all('/@@GLOBAL\.`(?<name>[^`]+)`/', $query, $matches) > 0) {
                   $row = [];

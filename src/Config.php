@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -118,9 +118,11 @@ class Config extends CommonDBTM
     public function canViewItem()
     {
         if (
-            isset($this->fields['context']) &&
-            ($this->fields['context'] == 'core' ||
-            Plugin::isPluginActive($this->fields['context']))
+            isset($this->fields['context'])
+            && (
+                in_array($this->fields['context'], ['core', 'inventory'], true) // GLPI config contexts
+                || Plugin::isPluginActive($this->fields['context'])
+            )
         ) {
             return true;
         }
@@ -141,6 +143,7 @@ class Config extends CommonDBTM
 
     public function prepareInputForUpdate($input)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
        // Unset _no_history to not save it as a configuration value
@@ -295,6 +298,23 @@ class Config extends CommonDBTM
             $input['glpinetwork_registration_key'] = trim($input['glpinetwork_registration_key']);
         }
 
+        // Prevent invalid profile to be set as the lock profile.
+        // User updating the config from GLPI's UI should not be able to send
+        // invalid values but API or manual HTTP requests might be invalid.
+        if (isset($input['lock_lockprofile_id'])) {
+            $profile = Profile::getById($input['lock_lockprofile_id']);
+
+            if (!$profile || $profile->fields['interface'] !== 'central') {
+                // Invalid profile
+                Session::addMessageAfterRedirect(
+                    __("The specified profile doesn't exist or is not allowed to access the central interface."),
+                    false,
+                    ERROR
+                );
+                unset($input['lock_lockprofile_id']);
+            }
+        }
+
         $this->setConfigurationValues('core', $input);
 
         return false;
@@ -309,6 +329,7 @@ class Config extends CommonDBTM
      */
     private function handleSmtpInput(array $input): array
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (array_key_exists('smtp_mode', $input) && (int)$input['smtp_mode'] === MAIL_SMTPOAUTH) {
@@ -386,6 +407,7 @@ class Config extends CommonDBTM
      **/
     public function showFormDisplay()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!self::canView()) {
@@ -406,6 +428,7 @@ class Config extends CommonDBTM
      **/
     public function showFormInventory()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!self::canView()) {
@@ -591,6 +614,7 @@ class Config extends CommonDBTM
      **/
     public function showFormAuthentication()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!Config::canUpdate()) {
@@ -641,7 +665,12 @@ class Config extends CommonDBTM
      **/
     public function showFormDBSlave()
     {
-        global $DB, $CFG_GLPI, $DBslave;
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         * @var \DBmysql $DBslave
+         */
+        global $CFG_GLPI, $DB, $DBslave;
 
         if (!Config::canUpdate()) {
             return;
@@ -715,6 +744,7 @@ class Config extends CommonDBTM
      **/
     public function showFormAPI()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!self::canView()) {
@@ -801,6 +831,7 @@ class Config extends CommonDBTM
      **/
     public function showFormHelpdesk()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!self::canView()) {
@@ -994,6 +1025,10 @@ class Config extends CommonDBTM
      **/
     public function showFormUserPrefs($data = [])
     {
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
         global $CFG_GLPI, $DB;
 
         $oncentral = (Session::getCurrentInterface() == "central");
@@ -1497,7 +1532,7 @@ class Config extends CommonDBTM
                 'value' => $data['default_dashboard_mini_ticket'],
                 'display_emptychoice' => true,
                 'context'   => 'mini_core',
-            ]);
+            ], true);
             echo "</td></tr>";
         }
 
@@ -1519,6 +1554,7 @@ class Config extends CommonDBTM
      */
     public static function arePasswordSecurityChecksEnabled(): bool
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         return $CFG_GLPI["use_password_security"];
@@ -1533,6 +1569,7 @@ class Config extends CommonDBTM
      **/
     public static function displayPasswordSecurityChecks($field = 'password')
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $needs = [];
@@ -1625,6 +1662,7 @@ class Config extends CommonDBTM
      **/
     public static function validatePassword($password, $display = true)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $ok = true;
@@ -1852,6 +1890,10 @@ class Config extends CommonDBTM
 
     public static function showSystemInfoTable($params = [])
     {
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
         global $CFG_GLPI, $DB;
 
         $p = [
@@ -1875,7 +1917,7 @@ class Config extends CommonDBTM
             $dir = getcwd();
             chdir(GLPI_ROOT);
             $returnCode = 1;
-            /** @var array $output */
+            $output = [];
             $gitrev = @exec('git show --format="%h" --no-patch 2>&1', $output, $returnCode);
             $gitbranch = '';
             if (!$returnCode) {
@@ -1907,7 +1949,7 @@ class Config extends CommonDBTM
 
         foreach (
             ['max_execution_time', 'memory_limit', 'post_max_size', 'safe_mode',
-                'session.save_handler', 'upload_max_filesize'
+                'session.save_handler', 'upload_max_filesize', 'disable_functions'
             ] as $key
         ) {
             $msg .= $key . '="' . ini_get($key) . '" ';
@@ -1995,7 +2037,11 @@ class Config extends CommonDBTM
      **/
     public function showSystemInformations()
     {
-        global $DB, $CFG_GLPI;
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
+        global $CFG_GLPI, $DB;
 
         if (!Config::canUpdate()) {
             return false;
@@ -2083,6 +2129,14 @@ class Config extends CommonDBTM
 
         echo "</table>";
         Html::closeForm();
+        $cleaner_script = <<<JS
+        // Search all .section-content text content and Replace all instances of a '#' followed by a number so that there is a zero-width space between the # and the number
+        $('.section-content').each(function() {
+          $(this).html($(this).html().replace(/#(\d+)/g, '#\u200B$1'));
+        });
+JS;
+        echo Html::scriptBlock($cleaner_script);
+
 
         echo "<p>" . Telemetry::getViewLink() . "</p>";
 
@@ -2109,8 +2163,10 @@ HTML;
 
     /**
      * Retrieve full directory of a lib
+     *
      * @param  $libstring  object, class or function
-     * @return string       the path or false
+     *
+     * @return false|string the path or false
      *
      * @since 9.1
      */
@@ -2212,9 +2268,6 @@ HTML;
             ],
             [ 'name'    => 'rlanvin/php-rrule',
                 'check'   => 'RRule\\RRule'
-            ],
-            [ 'name'    => 'blueimp/jquery-file-upload',
-                'check'   => 'UploadHandler'
             ],
             [ 'name'    => 'ramsey/uuid',
                 'check'   => 'Ramsey\\Uuid\\Uuid'
@@ -2370,6 +2423,7 @@ HTML;
      **/
     public static function getLanguage($lang)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
        // Alternative language code: en-EN --> en_EN
@@ -2409,7 +2463,11 @@ HTML;
 
     public static function detectRootDoc()
     {
-        global $DB, $CFG_GLPI;
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
+        global $CFG_GLPI, $DB;
 
         if (isset($CFG_GLPI['root_doc'])) {
             return; // already computed
@@ -2417,9 +2475,15 @@ HTML;
 
         if (isset($_SERVER['REQUEST_URI'])) {
             // $_SERVER['REQUEST_URI'] is set, meaning that GLPI is accessed from web server.
-            // In this case, `$CFG_GLPI['root_doc']` corresponds to the piece of URI
-            // that is common between `GLPI_ROOT` and $_SERVER['REQUEST_URI']
-            // e.g. GLPI_ROOT=/var/www/glpi and $_SERVER['REQUEST_URI']=/glpi/front/index.php -> $CFG_GLPI['root_doc']=/glpi
+
+            // In this case, `$CFG_GLPI['root_doc']` corresponds to the piece of path
+            // that is common between `GLPI_ROOT` and $_SERVER['SCRIPT_NAME']
+            // e.g. GLPI_ROOT=/var/www/glpi and $_SERVER['SCRIPT_NAME']=/glpi/front/index.php -> $CFG_GLPI['root_doc']=/glpi
+
+            // We cannot rely on $_SERVER['REQUEST_URI'] value as it is a value defined by HTTP client.
+            // $_SERVER['SCRIPT_NAME'] is consider safe as it is either set by GLPI router (see `/public/index.php`),
+            // either it contains the path of PHP script executed by the web server.
+            $script_path = $_SERVER['SCRIPT_NAME'];
 
             // Extract relative path of entry script directory
             // e.g. /var/www/mydomain.org/glpi/front/index.php -> /front
@@ -2429,26 +2493,22 @@ HTML;
                 str_replace(DIRECTORY_SEPARATOR, '/', realpath(getcwd()))
             );
 
-            // Extract relative path of request URI directory
+            // Extract relative path of script directory
             // e.g. /glpi/front/index.php -> /glpi/front
-            $request_dir_relative = preg_replace(
+            $script_dir_relative = preg_replace(
                 '/\/[0-9a-zA-Z\.\-\_]+\.php/',
                 '',
-                Html::cleanParametersURL($_SERVER['REQUEST_URI'])
+                $script_path
             );
             // API exception (handles `RewriteRule api/(.*)$ apirest.php/$1`)
-            if (strpos($request_dir_relative, 'api/') !== false) {
-                $request_dir_relative = preg_replace("/(.*\/)api\/.*/", "$1", $request_dir_relative);
+            if (strpos($script_dir_relative, 'api/') !== false) {
+                $script_dir_relative = preg_replace("/(.*\/)api\/.*/", "$1", $script_dir_relative);
             }
 
             // Remove relative path of entry script directory
             // e.g. /glpi/front -> /glpi
-            $root_doc = str_replace($current_dir_relative, '', $request_dir_relative);
+            $root_doc = str_replace($current_dir_relative, '', $script_dir_relative);
             $root_doc = rtrim($root_doc, '/');
-
-            // urldecode for space redirect to encoded URL : change entity
-            // note: not sure this line is actually used
-            $root_doc = urldecode($root_doc);
 
             $CFG_GLPI['root_doc'] = $root_doc;
         } else {
@@ -2508,11 +2568,11 @@ HTML;
     public function getTabNameForItem(CommonGLPI $item, $withtemplate = 0)
     {
 
-        switch ($item->getType()) {
-            case 'Preference':
+        switch (get_class($item)) {
+            case Preference::class:
                 return __('Personalization');
 
-            case 'User':
+            case User::class:
                 if (
                     User::canUpdate()
                     && $item->currentUserHaveMoreRightThan($item->getID())
@@ -2521,7 +2581,7 @@ HTML;
                 }
                 break;
 
-            case __CLASS__:
+            case self::class:
                 $tabs = [
                     1 => __('General setup'),  // Display
                     2 => __('Default values'), // Prefs
@@ -2558,20 +2618,21 @@ HTML;
 
     public static function displayTabContentForItem(CommonGLPI $item, $tabnum = 1, $withtemplate = 0)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
-        if ($item->getType() == 'Preference') {
+        if ($item instanceof Preference) {
             $config = new self();
             $user   = new User();
             if ($user->getFromDB(Session::getLoginUserID())) {
                 $user->computePreferences();
                 $config->showFormUserPrefs($user->fields);
             }
-        } else if ($item->getType() == 'User') {
+        } else if ($item instanceof User) {
             $config = new self();
             $item->computePreferences();
             $config->showFormUserPrefs($item->fields);
-        } else if ($item->getType() == __CLASS__) {
+        } else if ($item instanceof self) {
             switch ($tabnum) {
                 case 1:
                     $item->showFormDisplay();
@@ -2637,6 +2698,7 @@ HTML;
      **/
     public static function displayCheckDbEngine($fordebug = false, $version = null)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $error = 0;
@@ -2687,6 +2749,7 @@ HTML;
     public static function checkDbEngine($raw = null)
     {
         if ($raw === null) {
+            /** @var \DBmysql $DB */
             global $DB;
             $raw = $DB->getVersion();
         }
@@ -2827,10 +2890,11 @@ HTML;
      *
      * @since 0.85
      *
-     * @return DB version
+     * @return string DB version
      **/
     public static function getCurrentDBVersion()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
        //Default current case
@@ -2872,6 +2936,7 @@ HTML;
      **/
     public static function getConfigurationValues($context, array $names = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $query = [
@@ -2919,6 +2984,10 @@ HTML;
     public static function loadLegacyConfiguration()
     {
 
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
         global $CFG_GLPI, $DB;
 
         $iterator = $DB->request(['FROM' => 'glpi_configs']);
@@ -3074,7 +3143,7 @@ HTML;
      *
      * @param bool $is_dev
      *
-     * @return void
+     * @return string
      */
     public static function agreeUnstableMessage(bool $is_dev)
     {
@@ -3130,6 +3199,7 @@ HTML;
      */
     public function showFormLogs()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!Config::canUpdate()) {
@@ -3346,6 +3416,7 @@ HTML;
      */
     public function showFormSecurity()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!Config::canUpdate()) {
@@ -3547,6 +3618,7 @@ HTML;
      */
     public function showFormManagement()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!self::canView()) {
@@ -3627,9 +3699,13 @@ HTML;
         $this->logConfigChange($this->fields['context'], $this->fields['name'], (string)$this->fields['value'], '');
     }
 
-    public function post_updateItem($history = 1)
+    public function post_updateItem($history = true)
     {
-        global $DB, $CFG_GLPI;
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
+        global $CFG_GLPI, $DB;
         // Check if password expiration mechanism has been activated
         if (
             $this->fields['name'] == 'password_expiration_delay'
@@ -3649,6 +3725,12 @@ HTML;
                 ['state' => 1,],
                 ['name' => 'passwordexpiration']
             );
+        }
+
+        // If the `devices_in_menu` option changed, we should regenerate the menu (unless we are in debug mode where it is always regenerated)
+        if ($this->fields['name'] === 'devices_in_menu' && $_SESSION['glpi_use_mode'] !== Session::DEBUG_MODE) {
+            $CFG_GLPI['devices_in_menu'] = json_decode($this->fields['value']) ?? [];
+            Html::generateMenuSession(true);
         }
 
         if (array_key_exists('value', $this->oldvalues)) {
@@ -3713,6 +3795,7 @@ HTML;
      */
     public static function getSafeConfig($safer = false)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $excludedKeys = array_flip(self::$undisclosedFields);
@@ -3883,6 +3966,7 @@ HTML;
      */
     private static function getEmailSenderFromEntityOrConfig(string $config_name, ?int $entities_id = null): array
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $email_config_name = $config_name;
@@ -3958,14 +4042,14 @@ HTML;
      */
     public static function getConfigIDForContext(string $context)
     {
+        /** @var \DBmysql $DB */
         global $DB;
         $iterator = $DB->request([
-            'SELECT' => 'id',
+            'SELECT' => ['MIN' => 'id AS id'],
             'FROM'   => self::getTable(),
             'WHERE'  => [
                 'context' => $context,
             ],
-            'LIMIT'  => 1,
         ]);
         if (count($iterator)) {
             return $iterator->current()['id'];

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -119,7 +119,7 @@ class DbTestCase extends \GLPITestCase
     {
         $input = Sanitizer::dbUnescapeRecursive($input); // slashes in input should not be stored in DB
 
-        $this->integer((int)$id)->isGreaterThan(0);
+        $this->integer($id)->isGreaterThan($object instanceof Entity ? -1 : 0);
         $this->boolean($object->getFromDB($id))->isTrue();
         $this->variable($object->getField('id'))->isEqualTo($id);
 
@@ -214,6 +214,7 @@ class DbTestCase extends \GLPITestCase
         $this->integer($id)->isGreaterThan(0);
 
         // Remove special fields
+        $skip_fields[] = 'id';
         $input = array_filter($input, function ($key) use ($skip_fields) {
             return !in_array($key, $skip_fields) && strpos($key, '_') !== 0;
         }, ARRAY_FILTER_USE_KEY);
@@ -228,8 +229,9 @@ class DbTestCase extends \GLPITestCase
      *
      * @param string $itemtype
      * @param array $input
+     * @param array $skip_fields Fields that wont be checked after update
      */
-    protected function updateItem($itemtype, $id, $input)
+    protected function updateItem($itemtype, $id, $input, $skip_fields = [])
     {
         $item = new $itemtype();
         $input['id'] = $id;
@@ -237,9 +239,9 @@ class DbTestCase extends \GLPITestCase
         $success = $item->update($input);
         $this->boolean($success)->isTrue();
 
-       // Remove special fields
-        $input = array_filter($input, function ($key) {
-            return strpos($key, '_') !== 0;
+        // Remove special fields
+        $input = array_filter($input, function ($key) use ($skip_fields) {
+            return !in_array($key, $skip_fields) && strpos($key, '_') !== 0;
         }, ARRAY_FILTER_USE_KEY);
 
         $this->checkInput($item, $id, $input);
@@ -261,5 +263,45 @@ class DbTestCase extends \GLPITestCase
         }
 
         return $items;
+    }
+
+    /**
+     * Helper method to avoid writting the same boilerplate code for rule creation
+     *
+     * @param RuleBuilder $builder RuleConfiguration
+     *
+     * @return Rule Created rule
+     */
+    protected function createRule(RuleBuilder $builder): Rule
+    {
+        $rule = $this->createItem(RuleTicket::class, [
+            'is_active'    => 1,
+            'sub_type'     => 'RuleTicket',
+            'name'         => $builder->getName(),
+            'match'        => $builder->getOperator(),
+            'condition'    => $builder->getCondition(),
+            'is_recursive' => $builder->isRecursive(),
+            'entities_id'  => $builder->getEntity(),
+        ]);
+
+        foreach ($builder->getCriteria() as $criterion) {
+            $this->createItem(RuleCriteria::class, [
+                'rules_id'  => $rule->getID(),
+                'criteria'  => $criterion['criteria'],
+                'condition' => $criterion['condition'],
+                'pattern'   => $criterion['pattern'],
+            ]);
+        }
+
+        foreach ($builder->getActions() as $criterion) {
+            $this->createItem(RuleAction::class, [
+                'rules_id'    => $rule->getID(),
+                'action_type' => $criterion['action_type'],
+                'field'       => $criterion['field'],
+                'value'       => $criterion['value'],
+            ]);
+        }
+
+        return $rule;
     }
 }

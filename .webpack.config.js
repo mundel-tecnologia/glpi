@@ -46,9 +46,15 @@ let config = {
                     path.resolve(__dirname, 'node_modules/jquery-migrate'),
                     path.resolve(__dirname, 'node_modules/photoswipe'),
                     path.resolve(__dirname, 'node_modules/rrule'),
-                    path.resolve(__dirname, 'vendor/blueimp/jquery-file-upload'),
+                    path.resolve(__dirname, 'lib/blueimp/jquery-file-upload'),
                 ],
                 use: ['script-loader', 'strip-sourcemap-loader'],
+            },
+            {
+                // Test for a polyfill (or any file) and it won't be included in your
+                // bundle
+                test: path.resolve(__dirname, 'node_modules/jquery.fancytree/dist/modules/jquery.fancytree.ui-deps.js'),
+                use: 'null-loader',
             },
             {
             // Build styles

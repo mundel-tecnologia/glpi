@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -126,6 +126,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
 
     public static function canView()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         return (Session::haveRightsOr(self::$rightname, [READ, self::READFAQ])
@@ -182,6 +183,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public static function getSearchURL($full = true)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $dir = ($full ? $CFG_GLPI['root_doc'] : '');
@@ -199,6 +201,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public static function getFormURL($full = true)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $dir = ($full ? $CFG_GLPI['root_doc'] : '');
@@ -462,6 +465,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public function isPubliclyVisible()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!$CFG_GLPI['use_public_faq']) {
@@ -506,6 +510,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
     {
        //not deprecated because used in self::getListRequest and self::showRecentPopular
 
+        /** @var \DBmysql $DB */
         global $DB;
 
        //get and clean criteria
@@ -535,6 +540,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
     {
        //not deprecated because used in self::getListRequest and self::showRecentPopular
 
+        /** @var \DBmysql $DB */
         global $DB;
 
        //get and clean criteria
@@ -570,6 +576,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      */
     public static function getVisibilityCriteria(bool $forceall = false): array
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         // Build common JOIN clause
@@ -611,6 +618,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      */
     private static function getVisibilityCriteriaCommonJoin(bool $forceall = false)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $join = [];
@@ -681,7 +689,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
                 $where[Entity_KnowbaseItem::getTableField('is_recursive')] = 1;
             }
         } else {
-            $where = self::getVisibilityCriteriaKB_Entity();
+            $where = self::getVisibilityCriteriaKB();
             $where['is_faq'] = 1;
         }
 
@@ -851,7 +859,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
         return $input;
     }
 
-    public function post_updateItem($history = 1)
+    public function post_updateItem($history = true)
     {
         // Handle rich-text images and uploaded documents
         $this->input = $this->addFiles(
@@ -886,6 +894,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public function showForm($ID, array $options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
        // show kb item form
@@ -1107,6 +1116,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public function addToFaq()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $DB->update(
@@ -1127,6 +1137,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      */
     public function updateCounter()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
        //update counter view
@@ -1147,12 +1158,14 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      *
      * @param $options      array of options
      *
-     * @return void|string
-     *    void if option display=true
-     *    string if option display=false (HTML code)
+     * @return boolean|string
      **/
     public function showFull($options = [])
     {
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
         global $CFG_GLPI, $DB;
 
         if (!$this->can($this->fields['id'], READ)) {
@@ -1323,6 +1336,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public function searchForm($options)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (
@@ -1369,6 +1383,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public function showBrowseForm($options)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (
@@ -1472,6 +1487,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public static function getListRequest(array $params, $type = 'search')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $criteria = [
@@ -1804,6 +1820,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      **/
     public static function showList($options, $type = 'search')
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $DBread = DBConnection::getReadConnection();
@@ -2064,7 +2081,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
                     && isset($options['item_items_id'])
                     && ($output_type == Search::HTML_OUTPUT)
                 ) {
-                    $forcetab = $options['item_itemtype'] . '$1';
+                    $forcetab = $options['item_itemtype'] . '$main';
                     $item_itemtype = $options['item_itemtype'];
                     $content = "<a href='" . $item_itemtype::getFormURLWithID($options['item_items_id']) .
                               "&amp;load_kb_sol=" . $data['id'] .
@@ -2109,16 +2126,17 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      * @param string $type    type : recent / popular / not published
      * @param bool   $display if false, return html
      *
-     * @return void
+     * @return void|string
      **/
     public static function showRecentPopular(string $type = "", bool $display = true)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $faq = !Session::haveRight(self::$rightname, READ);
 
         $criteria = [
-            'SELECT'    => ['glpi_knowbaseitems.*'],
+            'SELECT'    => ['glpi_knowbaseitems' => ['id', 'name', 'is_faq']],
             'DISTINCT'  => true,
             'FROM'      => self::getTable(),
             'WHERE'     => [],
@@ -2126,10 +2144,10 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
         ];
 
         if ($type == "recent") {
-            $criteria['ORDERBY'] = 'date_creation DESC';
+            $criteria['ORDERBY'] = self::getTable() . '.date_creation DESC';
             $title   = __('Recent entries');
         } else if ($type == 'lastupdate') {
-            $criteria['ORDERBY'] = 'date_mod DESC';
+            $criteria['ORDERBY'] = self::getTable() . '.date_mod DESC';
             $title   = __('Last updated entries');
         } else {
             $criteria['ORDERBY'] = 'view DESC';
@@ -2451,6 +2469,7 @@ class KnowbaseItem extends CommonDBVisible implements ExtraVisibilityCriteria
      */
     public static function getForCategory($category_id, $kbi = null)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         if ($kbi === null) {

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -32,6 +32,8 @@
  *
  * ---------------------------------------------------------------------
  */
+
+use Glpi\Event;
 
 /**
  * Profile class
@@ -225,8 +227,9 @@ class Profile extends CommonDBTM
     }
 
 
-    public function post_updateItem($history = 1)
+    public function post_updateItem($history = true)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         if (count($this->profileRight) > 0) {
@@ -266,6 +269,7 @@ class Profile extends CommonDBTM
 
     public function post_addItem()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $rights = ProfileRight::getAllPossibleRights();
@@ -308,6 +312,8 @@ class Profile extends CommonDBTM
 
     public function prepareInputForUpdate($input)
     {
+        /** @var array $CFG_GLPI */
+        global $CFG_GLPI;
 
         if (isset($input["_helpdesk_item_types"])) {
             if ((!isset($input["helpdesk_item_type"])) || (!is_array($input["helpdesk_item_type"]))) {
@@ -415,6 +421,30 @@ class Profile extends CommonDBTM
                 ERROR
             );
             unset($input['_profile']);
+        }
+
+        if (isset($input['interface']) && $input['interface'] == 'helpdesk' && $this->isLastSuperAdminProfile()) {
+            Session::addMessageAfterRedirect(
+                __("Can't change the interface on this profile as it is the only remaining profile with rights to modify profiles with this interface."),
+                false,
+                ERROR
+            );
+            unset($input['interface']);
+        }
+
+        // If the profile is used as the "Profile to be used when locking items",
+        // it can't be set to the "helpdesk" interface.
+        if (
+            isset($input['interface'])
+            && $input['interface'] === "helpdesk"
+            && $this->fields['id'] === (int) $CFG_GLPI['lock_lockprofile_id']
+        ) {
+            Session::addMessageAfterRedirect(
+                __("This profile can't be moved to the simplified interface as it is used for locking items."),
+                false,
+                ERROR
+            );
+            unset($input['interface']);
         }
 
         // KEEP AT THE END
@@ -646,6 +676,7 @@ class Profile extends CommonDBTM
      **/
     public static function currentUserHaveMoreRightThan($IDs = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         if (Session::isCron()) {
@@ -757,7 +788,10 @@ class Profile extends CommonDBTM
         Dropdown::showFromArray(
             'interface',
             self::getInterfaces(),
-            ['value' => $this->fields["interface"]]
+            [
+                'value' => $this->fields["interface"],
+                'readonly' => $this->isLastSuperAdminProfile() && $this->fields['interface'] == 'central'
+            ]
         );
         echo "</td></tr>\n";
 
@@ -930,6 +964,10 @@ class Profile extends CommonDBTM
                             $fn_get_rights(__CLASS__, 'central', ['scope' => 'global']),
                             $fn_get_rights(QueuedNotification::class, 'central', ['scope' => 'global']),
                             $fn_get_rights(Log::class, 'central', ['scope' => 'global']),
+                            $fn_get_rights(Event::class, 'central', [
+                                'scope' => 'global',
+                                'label' => __('System logs')
+                            ]),
                         ],
                         'inventory' => [
                             $fn_get_rights(\Glpi\Inventory\Conf::class, 'central', [
@@ -960,7 +998,10 @@ class Profile extends CommonDBTM
                                 'rights' => [
                                     READ  => __('Read'),
                                     UPDATE  => __('Update'),
-                                    DELETE => __('Delete'),
+                                    DELETE => [
+                                        'short' => __('Delete'),
+                                        'long'  => _x('button', 'Put in trashbin')
+                                    ],
                                     PURGE   => [
                                         'short' => __('Purge'),
                                         'long'  => _x('button', 'Delete permanently')
@@ -1022,7 +1063,7 @@ class Profile extends CommonDBTM
                                 'scope'     => 'global'
                             ]),
                             $fn_get_rights(RuleDictionnaryPrinter::class, 'central', [
-                                'label'     => __('Printers dictionnary'),
+                                'label'     => __('Printers dictionary'),
                                 'scope'     => 'global'
                             ]),
                         ]
@@ -1169,7 +1210,7 @@ class Profile extends CommonDBTM
         echo "</tr>";
 
         echo "<tr>";
-        echo "<td>" . __('Associable items to a ticket') . "</td>";
+        echo "<td>" . __('Associable items to tickets, changes and problems') . "</td>";
         echo "<td><input type='hidden' name='_helpdesk_item_types' value='1'>";
         self::dropdownHelpdeskItemtypes(['values' => $this->fields["helpdesk_item_type"]]);
 
@@ -1550,7 +1591,7 @@ class Profile extends CommonDBTM
         echo "</td></tr>";
 
         echo "<tr>";
-        echo "<td>" . __('Associable items to a ticket') . "</td>";
+        echo "<td>" . __('Associable items to tickets, changes and problems') . "</td>";
         echo "<td><input type='hidden' name='_helpdesk_item_types' value='1'>";
         self::dropdownHelpdeskItemtypes(['values' => $this->fields["helpdesk_item_type"]]);
         echo "</td>";
@@ -2998,11 +3039,26 @@ class Profile extends CommonDBTM
             'name'               => _n('Log', 'Logs', Session::getPluralNumber()),
             'datatype'           => 'right',
             'rightclass'         => 'Log',
-            'rightname'          => 'logs',
+            'rightname'          => Log::$rightname,
             'nowrite'            => true,
             'joinparams'         => [
                 'jointype'           => 'child',
-                'condition'          => ['NEWTABLE.name' => 'logs']
+                'condition'          => ['NEWTABLE.name' => Log::$rightname]
+            ]
+        ];
+
+        $tab[] = [
+            'id'                 => '62',
+            'table'              => 'glpi_profilerights',
+            'field'              => 'rights',
+            'name'               => __('System logs'),
+            'datatype'           => 'right',
+            'rightclass'         => 'Log',
+            'rightname'          => Event::$rightname,
+            'nowrite'            => true,
+            'joinparams'         => [
+                'jointype'           => 'child',
+                'condition'          => ['NEWTABLE.name' => Event::$rightname]
             ]
         ];
 
@@ -3206,7 +3262,7 @@ class Profile extends CommonDBTM
             'id'                 => '87',
             'table'              => $this->getTable(),
             'field'              => 'helpdesk_item_type',
-            'name'               => __('Associable items to a ticket'),
+            'name'               => __('Associable items to tickets, changes and problems'),
             'massiveaction'      => false,
             'datatype'           => 'specific'
         ];
@@ -3658,6 +3714,7 @@ class Profile extends CommonDBTM
      **/
     public static function dropdownUnder($options = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $p['name']  = 'profiles_id';
@@ -3699,6 +3756,7 @@ class Profile extends CommonDBTM
      **/
     public static function getDefault()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         foreach ($DB->request('glpi_profiles', ['is_default' => 1]) as $data) {
@@ -3778,6 +3836,7 @@ class Profile extends CommonDBTM
      **/
     public static function getHelpdeskItemtypes()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $values = [];
@@ -3799,6 +3858,7 @@ class Profile extends CommonDBTM
      */
     public function getDomainRecordTypes()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $iterator = $DB->request([
@@ -3855,6 +3915,7 @@ class Profile extends CommonDBTM
      */
     public static function haveUserRight($user_id, $rightname, $rightvalue, $entity_id)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $result = $DB->request(
@@ -3931,7 +3992,7 @@ class Profile extends CommonDBTM
      *             'canedit'
      *             'default_class' the default CSS class used for the row
      *
-     * @return random value used to generate the ids
+     * @return integer random value used to generate the ids
      **/
     public function displayRightsChoiceMatrix(array $rights, array $options = [])
     {
@@ -4184,7 +4245,8 @@ class Profile extends CommonDBTM
                     'name'   => static::$rightname,
                     'rights' => ["&", UPDATE],
                 ]
-            ])
+            ]),
+            'interface' => 'central',
         ]);
 
         return array_column($super_admin_profiles, 'id');

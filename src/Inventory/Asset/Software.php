@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @copyright 2010-2022 by the FusionInventory Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
@@ -246,6 +246,7 @@ class Software extends InventoryAsset
 
     public function handle()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $mainasset_entities_id = 0;
@@ -573,6 +574,7 @@ class Software extends InventoryAsset
      */
     private function populateSoftware()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $criteria = [
@@ -630,6 +632,7 @@ class Software extends InventoryAsset
      */
     private function populateVersions()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         if (!count($this->softwares)) {
@@ -707,6 +710,7 @@ class Software extends InventoryAsset
      */
     private function storeSoftware()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $software = new GSoftware();
@@ -718,7 +722,7 @@ class Software extends InventoryAsset
             if (!isset($this->softwares[$skey])) {
                 $stmt_columns = $this->cleanInputToPrepare((array)$val, $soft_fields);
 
-                $software->handleCategoryRules($stmt_columns);
+                $software->handleCategoryRules($stmt_columns, true);
                 //set create date
                 $stmt_columns['date_creation'] = $_SESSION["glpi_currenttime"];
 
@@ -762,6 +766,7 @@ class Software extends InventoryAsset
      */
     private function storeVersions()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $version = new SoftwareVersion();
@@ -853,6 +858,7 @@ class Software extends InventoryAsset
      */
     private function storeAssetLink()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         if (!count($this->data)) {
@@ -1011,7 +1017,7 @@ class Software extends InventoryAsset
     /**
      * Get comparison key with normalized data.
      *
-     * @param \stdClass $data
+     * @param array $data
      *
      * return string
      */

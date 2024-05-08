@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -213,9 +213,18 @@ class Profile extends DbTestCase
         $this->boolean($super_admin->isLastSuperAdminProfile())->isTrue();
         $this->boolean($super_admin_2->isLastSuperAdminProfile())->isFalse();
 
-        // Two super admin account, both can be deleted
+        // Two super admin account, can't be deleted because only one has central interface
         $this->updateItem("Profile", $super_admin_2->getID(), [
             '_profile' => [UPDATE . "_0" => true]
+        ]);
+        $this->boolean($super_admin->isLastSuperAdminProfile())->isTrue();
+        $this->boolean($super_admin->canPurgeItem())->isFalse();
+        $this->boolean($super_admin_2->isLastSuperAdminProfile())->isFalse();
+        $this->boolean($super_admin_2->canPurgeItem())->isTrue();
+
+        // Two super admin account, both can be deleted
+        $this->updateItem("Profile", $super_admin_2->getID(), [
+            'interface' => 'central'
         ]);
         $this->boolean($super_admin->isLastSuperAdminProfile())->isFalse();
         $this->boolean($super_admin->canPurgeItem())->isTrue();
@@ -239,6 +248,17 @@ class Profile extends DbTestCase
         ]))->isEqualTo(true);
         $this->hasSessionMessages(ERROR, [
             "Can't remove update right on this profile as it is the only remaining profile with this right."
+        ]);
+
+        // Try to change the interface of the lock profile
+        $readonly = getItemByTypeName('Profile', 'Read-Only');
+        $this->updateItem("Profile", $readonly->getID(), [
+            'interface' => 'helpdesk'
+        ], ['interface']); // Skip interface check as it should not be updated.
+        $readonly->getFromDB($readonly->fields['id']); // Reload data
+        $this->string($readonly->fields['interface'])->isEqualTo('central');
+        $this->hasSessionMessages(ERROR, [
+            "This profile can't be moved to the simplified interface as it is used for locking items."
         ]);
     }
 

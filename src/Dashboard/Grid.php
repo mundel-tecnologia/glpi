@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -35,6 +35,7 @@
 
 namespace Glpi\Dashboard;
 
+use Config;
 use DateInterval;
 use Dropdown;
 use Glpi\Application\View\TemplateRenderer;
@@ -233,6 +234,7 @@ HTML;
      */
     public function show(bool $mini = false, ?string $token = null)
     {
+        /** @var \Psr\SimpleCache\CacheInterface $GLPI_CACHE */
         global $GLPI_CACHE;
 
         $rand = mt_rand();
@@ -407,7 +409,7 @@ HTML;
         }
 
         $ajax_cards = GLPI_AJAX_DASHBOARD;
-        $cache_key  = sha1($_SESSION['glpiactiveentities_string '] ?? "");
+        $cache_key  = sha1($_SESSION['glpiactiveentities_string'] ?? "");
 
         $js_params = json_encode([
             'current'       => $this->current,
@@ -782,6 +784,7 @@ HTML;
      */
     public function displayEmbedForm()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $entities_id  = $_SESSION['glpiactive_entity'];
@@ -879,6 +882,7 @@ HTML;
      */
     public function getCardHtml(string $card_id = "", array $card_options = []): string
     {
+        /** @var \Psr\SimpleCache\CacheInterface $GLPI_CACHE */
         global $GLPI_CACHE;
 
         $gridstack_id = $card_options['args']['gridstack_id'] ?? $card_id;
@@ -975,6 +979,7 @@ HTML;
             $html = $render_error_html;
             $execution_time = round(microtime(true) - $start, 3);
             // Log the error message without exiting
+            /** @var \GLPI $GLPI */
             global $GLPI;
             $GLPI->getErrorHandler()->handleException($e, true);
         }
@@ -1075,12 +1080,16 @@ HTML;
      *
      * @return string
      */
-    public static function getAllDashboardCardsCacheKey(): string
+    public static function getAllDashboardCardsCacheKey(?string $language = null): string
     {
+        if ($language === null) {
+            $language = Session::getLanguage() ?? '';
+        }
+
         return sprintf(
             'getAllDashboardCards_%s_%s',
             sha1(json_encode(Filter::getRegisteredFilterClasses())),
-            Session::getLanguage() ?? ''
+            $language
         );
     }
 
@@ -1093,6 +1102,10 @@ HTML;
      */
     public function getAllDasboardCards($force = false): array
     {
+        /**
+         * @var array $CFG_GLPI
+         * @var \Psr\SimpleCache\CacheInterface $GLPI_CACHE
+         */
         global $CFG_GLPI, $GLPI_CACHE;
 
         $cards = $GLPI_CACHE->get(self::getAllDashboardCardsCacheKey());
@@ -1403,6 +1416,7 @@ HTML;
      */
     public function restoreLastDashboard(): string
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
         $new_key = "";
         $target = Toolbox::cleanTarget($_REQUEST['_target'] ?? $_SERVER['REQUEST_URI'] ?? "");
@@ -1438,6 +1452,9 @@ HTML;
      */
     public static function getDefaultDashboardForMenu(string $menu = "", bool $strict = false): string
     {
+        /** @var array $CFG_GLPI */
+        global $CFG_GLPI;
+
         $grid = new self();
 
         if (!$strict) {
@@ -1447,8 +1464,24 @@ HTML;
             }
         }
 
+        // Try loading default from user preferences
         $config_key = 'default_dashboard_' . $menu;
         $default    = $_SESSION["glpi$config_key"] ?? "";
+        if (strlen($default)) {
+            // If default is "disabled", return empty string and skip default value from config
+            if ($default == 'disabled') {
+                return "";
+            }
+
+            $dasboard = new Dashboard($default);
+
+            if ($dasboard->load() && $dasboard->canViewCurrent()) {
+                return $default;
+            }
+        }
+
+        // Try loading default from config
+        $default = $CFG_GLPI[$config_key] ?? "";
         if (strlen($default)) {
             $dasboard = new Dashboard($default);
 
@@ -1457,7 +1490,7 @@ HTML;
             }
         }
 
-       // if default not found, return first dashboards
+        // if default not found, return first dashboard
         if (!$strict) {
             self::loadAllDashboards();
             $first_dashboard = array_shift(self::$all_dashboards);
@@ -1470,7 +1503,7 @@ HTML;
     }
 
 
-    public static function dropdownDashboard(string $name = "", array $params = []): string
+    public static function dropdownDashboard(string $name = "", array $params = [], bool $disabled_option = false): string
     {
         $to_show = Dashboard::getAll(false, true, $params['context'] ?? 'core');
         $can_view_all = $params['can_view_all'] ?? false;
@@ -1480,6 +1513,10 @@ HTML;
             if (self::canViewSpecificicDashboard($key, $can_view_all)) {
                 $options_dashboards[$key] = $dashboard['name'] ?? $key;
             }
+        }
+
+        if ($disabled_option) {
+            $options_dashboards = ['disabled' => __('Disabled')] + $options_dashboards;
         }
 
         return Dropdown::showFromArray($name, $options_dashboards, $params);

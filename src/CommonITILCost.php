@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -63,7 +63,7 @@ abstract class CommonITILCost extends CommonDBChild
 
        // can exists for template
         if (
-            ($item->getType() == static::$itemtype)
+            (get_class($item) == static::$itemtype)
             && static::canView()
         ) {
             $nb = 0;
@@ -199,6 +199,7 @@ abstract class CommonITILCost extends CommonDBChild
 
     public static function rawSearchOptionsToAdd()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $tab = [];
@@ -339,7 +340,11 @@ abstract class CommonITILCost extends CommonDBChild
             $this->fields['cost_fixed'] = $lastdata['cost_fixed'];
         }
         if (isset($lastdata['budgets_id'])) {
-            $this->fields['budgets_id'] = $lastdata['budgets_id'];
+            $budget_id = $lastdata['budgets_id'];
+            $budget    = new Budget();
+            if ($budget->getFromDB($budget_id) && $budget->fields['is_deleted'] == 0) {
+                $this->fields['budgets_id'] = $budget_id;
+            }
         }
         if (isset($lastdata['name'])) {
             $this->fields['name'] = $lastdata['name'];
@@ -354,6 +359,7 @@ abstract class CommonITILCost extends CommonDBChild
      **/
     public function getTotalActionTimeForItem($items_id)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $result = $DB->request([
@@ -372,6 +378,7 @@ abstract class CommonITILCost extends CommonDBChild
      **/
     public function getLastCostForItem($items_id)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $result = $DB->request([
@@ -497,11 +504,15 @@ abstract class CommonITILCost extends CommonDBChild
      * @param $item                  CommonITILObject object or Project
      * @param $withtemplate boolean  Template or basic item (default 0)
      *
-     * @return number total cost
+     * @return false|integer total cost
      **/
     public static function showForObject($item, $withtemplate = 0)
     {
-        global $DB, $CFG_GLPI;
+        /**
+         * @var array $CFG_GLPI
+         * @var \DBmysql $DB
+         */
+        global $CFG_GLPI, $DB;
 
         $forproject = false;
         if (is_a($item, 'Project', true)) {
@@ -703,6 +714,7 @@ abstract class CommonITILCost extends CommonDBChild
      **/
     public static function getCostsSummary($type, $ID)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $result = $DB->request(

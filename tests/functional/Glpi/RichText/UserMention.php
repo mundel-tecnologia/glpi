@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -62,6 +62,7 @@ class UserMention extends DbTestCase
         $notification_targets->deleteByCriteria(['NOT' => ['items_id' => Notification::MENTIONNED_USER]]);
 
        // Add email to users for notifications
+        $this->login(); // must be authenticated to update emails
         $user = new User();
         $update = $user->update(['id' => $tech_id, '_useremails' => ['tech@glpi-project.org']]);
         $this->boolean($update)->isTrue();
@@ -131,7 +132,6 @@ HTML
                     'update_expected_observers' => [],
                     'update_expected_notified'  => [],
                 ];
-
                 yield [
                     'itemtype'      => $itemtype,
                     'main_itemtype' => $main_type,
@@ -165,6 +165,7 @@ HTML
                     // Created content => no notification to private users
                         'add_content'            => <<<HTML
                      <p>Hi <span data-user-mention="true" data-user-id="{$tech_id}">@tech</span>,</p>
+                     <br>
                      <p>I discussed with <span data-user-id="{$normal_id}" data-user-mention="true">@normal</span> about ...</p>
 HTML
                   ,
@@ -183,6 +184,26 @@ HTML
                         'is_private'                => true,
                     ];
                 }
+                yield [
+                    'itemtype'      => $itemtype,
+                    'main_itemtype' => $main_type,
+
+               // bad HTML no users are notified
+                    'add_content'            => <<<HTML
+                  </span></p></div></body></html>
+HTML
+               ,
+                    'add_expected_observers' => [],
+                    'add_expected_notified'  => [],
+
+               // update bad HTML => no users are notified
+                    'update_content'            => <<<HTML
+                  </span></p></div></body></html>
+HTML
+               ,
+                    'update_expected_observers' => [],
+                    'update_expected_notified'  => [],
+                ];
             }
         }
     }
@@ -303,6 +324,7 @@ HTML
         $notification_targets->deleteByCriteria(['NOT' => ['items_id' => Notification::MENTIONNED_USER]]);
 
        // Add email to users for notifications
+        $this->login(); // must be authenticated to update emails
         $user = new User();
         $update = $user->update(['id' => $tech_id, '_useremails' => ['tech@glpi-project.org']]);
         $this->boolean($update)->isTrue();
@@ -557,7 +579,7 @@ HTML
         $notification = new Notification();
         $id = $notification->add(
             [
-                'name'        => 'New user mentionned',
+                'name'        => 'New user mentioned',
                 'entities_id' => 0,
                 'itemtype'    => $itemtype,
                 'event'       => 'user_mention',
@@ -569,7 +591,7 @@ HTML
         $template = new NotificationTemplate();
         $template_id = $template->add(
             [
-                'name'     => 'New user mentionned',
+                'name'     => 'New user mentioned',
                 'itemtype' => $itemtype,
             ]
         );

@@ -5,7 +5,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -439,7 +439,9 @@ var GLPIPlanning  = {
                 }).done(function() {
                     // indicate to central page we're done rendering
                     if (!options.full_view) {
-                        $(document).trigger('masonry_grid:layout');
+                        setTimeout(function () {
+                            $(document).trigger('masonry_grid:layout');
+                        }, 100);
                     }
                 });
 
@@ -591,23 +593,35 @@ var GLPIPlanning  = {
                 var start = info.start;
                 var end = info.end;
 
-                glpi_ajax_dialog({
-                    url: CFG_GLPI.root_doc+"/ajax/planning.php",
-                    params: {
-                        action: 'add_event_fromselect',
-                        begin:  start.toISOString(),
-                        end:    end.toISOString(),
-                        res_itemtype: itemtype,
-                        res_items_id: items_id,
-                    },
-                    dialogclass: 'modal-lg',
-                    title: __('Add an event'),
-                    bs_focus: false
-                });
+                if ($('div.modal.planning-modal').length === 0) {
+                    glpi_ajax_dialog({
+                        url: CFG_GLPI.root_doc + "/ajax/planning.php",
+                        params: {
+                            action: 'add_event_fromselect',
+                            begin: start.toISOString(),
+                            end: end.toISOString(),
+                            res_itemtype: itemtype,
+                            res_items_id: items_id,
+                        },
+                        dialogclass: 'modal-lg planning-modal',
+                        title: __('Add an event'),
+                        bs_focus: false
+                    });
+                    GLPIPlanning.calendar.setOption('selectable', false);
+                    window.setTimeout(function() {
+                        GLPIPlanning.calendar.setOption('selectable', true);
+                    }, 500);
+                }
 
                 GLPIPlanning.calendar.unselect();
             }
         });
+
+        // Load the last known view only if it is valid (else load default view)
+        const view = this.calendar.isValidViewType(options.default_view) ?
+            options.default_view :
+            default_options.default_view;
+        this.calendar.changeView(view);
 
         $('.planning_on_central a')
             .mousedown(function() {

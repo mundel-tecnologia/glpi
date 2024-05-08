@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -39,6 +39,7 @@ use DbTestCase;
 use Glpi\Plugin\Hooks;
 use Log;
 use PHPMailer\PHPMailer\PHPMailer;
+use Profile;
 use Session;
 
 /* Test for inc/config.class.php */
@@ -95,7 +96,6 @@ class Config extends DbTestCase
             'Config$4'      => 'Assistance',
             'Config$12'     => 'Management',
             'GLPINetwork$1' => 'GLPI Network',
-            'Log$1'         => 'Historical',
         ];
         $this
          ->given($this->newTestedInstance)
@@ -894,5 +894,85 @@ class Config extends DbTestCase
             $infocom_exists = $infocom->getFromDBforDevice($asset_type, $asset_id2);
             $this->boolean($infocom_exists)->isFalse();
         }
+    }
+
+    public function testDetectRooDoc(): void
+    {
+        global $CFG_GLPI;
+
+        $uri_to_scriptname = [
+            '/'                        => '/index.php',
+            '/front/index.php?a=b'     => '/front/index.php',
+            '/api.php/endpoint/method' => '/api.php',
+            '//whatever/path/is'       => '/index.php', // considered as `path=/` + `pathinfo=/whatever/path/is` by GLPI router
+        ];
+
+        foreach (['', '/glpi', '/whatever/alias/is'] as $prefix) {
+            foreach ($uri_to_scriptname as $uri => $script_name) {
+                unset($CFG_GLPI['root_doc']);
+
+                chdir(GLPI_ROOT . dirname($script_name)); // cwd is expected to be the executed script dir
+
+                $server_bck = $_SERVER;
+                $_SERVER['REQUEST_URI'] = $prefix . $uri;
+                $_SERVER['SCRIPT_NAME'] = $prefix . $script_name;
+                \Config::detectRootDoc();
+                $_SERVER = $server_bck;
+
+                $this->string($CFG_GLPI['root_doc'])->isEqualTo($prefix);
+            }
+        }
+    }
+
+    public function testConfigLogNotEmpty()
+    {
+        $itemtype = 'Config';
+        $config_id = \Config::getConfigIDForContext('core');
+        $this->integer($config_id)->isGreaterThan(0);
+        $total_number = countElementsInTable("glpi_logs", ['items_id' => $config_id, 'itemtype' => $itemtype]);
+        $this->integer($total_number)->isGreaterThan(0);
+    }
+
+    /**
+     * Test the `prepareInputForUpdate` method.
+     *
+     * @return void
+     */
+    public function testPrepareInputForUpdate(): void
+    {
+        /** @var array $CFG_GLPI */
+        global $CFG_GLPI;
+
+        $this->login();
+
+        // Ensure the profile used for locks is valid.
+        $config = new \Config();
+        $default_lock_profile = $CFG_GLPI['lock_lockprofile_id']; // 8
+
+        // Invalid profile 1: simplified interface
+        $config->prepareInputForUpdate([
+            'lock_lockprofile_id' => getItemByTypeName(Profile::class, "Self-Service", true),
+        ]);
+        $this->integer((int) $CFG_GLPI['lock_lockprofile_id'])->isEqualTo($default_lock_profile);
+        $this->hasSessionMessages(ERROR, [
+            "The specified profile doesn't exist or is not allowed to access the central interface."
+        ]);
+
+        // Invalid profile 2: doesn't exist
+        $config->prepareInputForUpdate([
+            'lock_lockprofile_id' => 674568,
+        ]);
+        $this->integer((int) $CFG_GLPI['lock_lockprofile_id'])->isEqualTo($default_lock_profile);
+        $this->hasSessionMessages(ERROR, [
+            "The specified profile doesn't exist or is not allowed to access the central interface."
+        ]);
+
+        // Valid profile
+        $super_admin = getItemByTypeName(Profile::class, "Super-Admin", true);
+        $this->integer((int) $CFG_GLPI['lock_lockprofile_id'])->isNotEqualTo($super_admin);
+        $config->prepareInputForUpdate([
+            'lock_lockprofile_id' => $super_admin,
+        ]);
+        $this->integer((int) $CFG_GLPI['lock_lockprofile_id'])->isEqualTo($super_admin);
     }
 }

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -103,6 +103,7 @@ class Knowbase extends CommonGLPI
     public static function showSearchView()
     {
 
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
        // Search a solution
@@ -146,6 +147,7 @@ class Knowbase extends CommonGLPI
      **/
     public static function showBrowseView()
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $rand        = mt_rand();
@@ -159,9 +161,27 @@ class Knowbase extends CommonGLPI
 
         $JS = <<<JAVASCRIPT
          $(function() {
+            var loadingindicator  = $("<div class='loadingindicator'>$loading_txt</div>");
+            $('#items_list$rand').html(loadingindicator); // loadingindicator on doc ready
+            var loadNode = function(cat_id) {
+               $('#items_list$rand').html(loadingindicator);
+               $('#items_list$rand').load('$ajax_url', {
+                  'action': 'getItemslist',
+                  'cat_id': cat_id,
+                  'start': $start
+               });
+            };
+
             $('#tree_category$rand').fancytree({
                // load plugins
-               extensions: ['filter', 'glyph'],
+               extensions: ['filter', 'glyph', 'persist'],
+
+               persist: {
+                  cookiePrefix: 'fancytree-kb-',
+                  expandLazy: true,
+                  overrideSource: true,
+                  store: "auto"
+               },
 
                // Scroll node into visible area, when focused by keyboard
                autoScroll: true,
@@ -192,16 +212,6 @@ class Knowbase extends CommonGLPI
 
             });
 
-            var loadingindicator  = $("<div class='loadingindicator'>$loading_txt</div>");
-            $('#items_list$rand').html(loadingindicator); // loadingindicator on doc ready
-            var loadNode = function(cat_id) {
-               $('#items_list$rand').html(loadingindicator);
-               $('#items_list$rand').load('$ajax_url', {
-                  'action': 'getItemslist',
-                  'cat_id': cat_id,
-                  'start': $start
-               });
-            };
             loadNode($cat_id);
             $.ui.fancytree.getTree("#tree_category$rand").activateKey($cat_id);
 
@@ -231,6 +241,7 @@ JAVASCRIPT;
     public static function getTreeCategoryList()
     {
 
+        /** @var \DBmysql $DB */
         global $DB;
 
         $cat_table = KnowbaseItemCategory::getTable();

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -42,23 +42,27 @@ use Glpi\Toolbox\Sanitizer;
 
 /**
  * CommonITILObject Class
+ *
+ * @property-read array $users
+ * @property-read array $groups
+ * @property-read array $suppliers
  **/
 abstract class CommonITILObject extends CommonDBTM
 {
     use \Glpi\Features\Clonable;
     use \Glpi\Features\Timeline;
     use \Glpi\Features\Kanban;
-    use Glpi\Features\Teamwork;
+    use \Glpi\Features\Teamwork;
 
    /// Users by type
-    protected $users       = [];
+    protected $lazy_loaded_users = null;
     public $userlinkclass  = '';
    /// Groups by type
-    protected $groups      = [];
+    protected $lazy_loaded_groups = null;
     public $grouplinkclass = '';
 
    /// Suppliers by type
-    protected $suppliers      = [];
+    protected $lazy_loaded_suppliers = null;
     public $supplierlinkclass = '';
 
    /// Use user entity to select entity of the object
@@ -102,32 +106,198 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function post_getFromDB()
     {
-        $this->loadActors();
+        // Object may be reused to load multiples tickets thus we must clear all
+        // cached data when a new mysql row is loaded
+        $this->clearLazyLoadedActors();
     }
 
+    /**
+     * Load linked users
+     *
+     * @return void
+     */
+    public function loadUsers(): void
+    {
+        if (!empty($this->userlinkclass) && !$this->isNewItem()) {
+            $class = new $this->userlinkclass();
+            $this->lazy_loaded_users = $class->getActors($this->fields['id']);
+        } else {
+            $this->lazy_loaded_users = [];
+        }
+    }
+
+    /**
+     * Load linked groups
+     *
+     * @return void
+     */
+    protected function loadGroups(): void
+    {
+        if (!empty($this->grouplinkclass) && !$this->isNewItem()) {
+            $class = new $this->grouplinkclass();
+            $this->lazy_loaded_groups = $class->getActors($this->fields['id']);
+        } else {
+            $this->lazy_loaded_groups = [];
+        }
+    }
+
+    /**
+     * Load linked suppliers
+     *
+     * @return void
+     */
+    public function loadSuppliers(): void
+    {
+        if (!empty($this->supplierlinkclass) && !$this->isNewItem()) {
+            $class = new $this->supplierlinkclass();
+            $this->lazy_loaded_suppliers = $class->getActors($this->fields['id']);
+        } else {
+            $this->lazy_loaded_suppliers = [];
+        }
+    }
 
     /**
      * @since 0.84
      **/
     public function loadActors()
     {
+        // TODO 10.1 (breaking change): method should be protected instead of public
 
-        if (!empty($this->grouplinkclass)) {
-            $class        = new $this->grouplinkclass();
-            $this->groups = $class->getActors($this->fields['id']);
-        }
+        // Might not be 100% needed to clear cache here but lets be safe
+        // This way, any direct call to loadActors is assured to return accurate data
+        $this->clearLazyLoadedActors();
 
-        if (!empty($this->userlinkclass)) {
-            $class        = new $this->userlinkclass();
-            $this->users  = $class->getActors($this->fields['id']);
-        }
+        // Load each actors type
+        $this->loadUsers();
+        $this->loadGroups();
+        $this->loadSuppliers();
+    }
 
-        if (!empty($this->supplierlinkclass)) {
-            $class            = new $this->supplierlinkclass();
-            $this->suppliers  = $class->getActors($this->fields['id']);
+    /**
+     * Clear lazy loaded actor data so it can be recomputed again next time its
+     * accessed
+     *
+     * @return void
+     */
+    protected function clearLazyLoadedActors(): void
+    {
+        $this->lazy_loaded_users = null;
+        $this->lazy_loaded_groups = null;
+        $this->lazy_loaded_suppliers = null;
+    }
+
+    /**
+     * Magic getter for lazy loaded properties
+     *
+     * @param string $property_name
+     */
+    public function __get(string $property_name)
+    {
+        switch ($property_name) {
+            case 'users':
+                if ($this->lazy_loaded_users === null) {
+                    $this->loadUsers();
+                }
+                return $this->lazy_loaded_users;
+
+            case 'groups':
+                if ($this->lazy_loaded_groups === null) {
+                    $this->loadGroups();
+                }
+                return $this->lazy_loaded_groups;
+
+            case 'suppliers':
+                if ($this->lazy_loaded_suppliers === null) {
+                    $this->loadSuppliers();
+                }
+                return $this->lazy_loaded_suppliers;
+
+            default:
+                // Log error and keep running
+                // TODO 10.1: throw exception instead
+                trigger_error("Unknown field: '$property_name'", E_USER_WARNING);
+                return null;
         }
     }
 
+    /**
+     * Magic setter for lazy loaded properties
+     *
+     * @param string $property_name
+     * @param mixed $value
+     */
+    public function __set(string $property_name, $value)
+    {
+        switch ($property_name) {
+            case 'users':
+            case 'groups':
+            case 'suppliers':
+                // Log error and keep running
+                // TODO 10.1: throw exception instead
+                trigger_error("Readonly field: '$property_name'", E_USER_WARNING);
+                break;
+
+            default:
+                if (version_compare(PHP_VERSION, '8.2.0', '<')) {
+                    // Trigger same deprecation notice as the one triggered by PHP 8.2+
+                    trigger_error(
+                        sprintf('Creation of dynamic property %s::$%s is deprecated', get_called_class(), $property_name),
+                        E_USER_DEPRECATED
+                    );
+                }
+                $this->$property_name = $value;
+                break;
+        }
+    }
+
+    /**
+     * Magic handler for isset() calls on lazy loaded properties
+     *
+     * @param string $property_name
+     */
+    public function __isset(string $property_name)
+    {
+        switch ($property_name) {
+            case 'users':
+            case 'groups':
+            case 'suppliers':
+                return true;
+
+            default:
+                // Log error and keep running
+                // TODO 10.1: throw exception instead
+                trigger_error("Unknown field: '$property_name'", E_USER_WARNING);
+                return false;
+        }
+    }
+
+    /**
+     * Magic handler for unset() calls on lazy loaded properties
+     *
+     * @param string $property_name
+     */
+    public function __unset(string $property_name)
+    {
+        switch ($property_name) {
+            case 'users':
+                $this->lazy_loaded_users = null;
+                break;
+
+            case 'groups':
+                $this->lazy_loaded_groups = null;
+                break;
+
+            case 'suppliers':
+                $this->lazy_loaded_suppliers = null;
+                break;
+
+            default:
+                // Log error and keep running
+                // TODO 10.1: throw exception instead
+                trigger_error("Unknown field: '$property_name'", E_USER_WARNING);
+                break;
+        }
+    }
 
     /**
      * Return the number of actors currently assigned to the object
@@ -138,7 +308,7 @@ abstract class CommonITILObject extends CommonDBTM
      */
     public function countActors(): int
     {
-        return count($this->groups) + count($this->users) + count($this->suppliers);
+        return $this->countGroups() + $this->countUsers() + $this->countSuppliers();
     }
 
 
@@ -466,6 +636,7 @@ abstract class CommonITILObject extends CommonDBTM
             'canpriority'             => $canupdate,
             'canassign'               => $canupdate,
             'has_pending_reason'      => PendingReason_Item::getForItem($this) !== false,
+            'load_kb_sol'             => $options['load_kb_sol'] ?? 0,
         ]);
 
         return true;
@@ -670,7 +841,10 @@ abstract class CommonITILObject extends CommonDBTM
         }
         if (isset($params['_actors']['requester'])) {
             foreach ($params['_actors']['requester'] as $actor) {
-                if ($actor['itemtype'] == "User") {
+                if (
+                    $actor['itemtype'] == "User"
+                    && (int)$actor['items_id'] > 0 // ignore actor that is added by only its email
+                ) {
                     $requesters[] = $actor['items_id'];
                 }
             }
@@ -1304,7 +1478,7 @@ abstract class CommonITILObject extends CommonDBTM
     /**
      * Count active ITIL Objects having given user as observer.
      *
-     * @param int $users_id
+     * @param int $user_id
      *
      * @return int
      */
@@ -1444,7 +1618,7 @@ abstract class CommonITILObject extends CommonDBTM
      *
      * @param array $input Input
      *
-     * @return array
+     * @return false|array
      */
     protected function handleTemplateFields(array $input)
     {
@@ -1459,7 +1633,7 @@ abstract class CommonITILObject extends CommonDBTM
         $type = null;
         if (isset($input['type'])) {
             $type = $input['type'];
-        } else if (isset($this->field['type'])) {
+        } else if (isset($this->fields['type'])) {
             $type = $this->fields['type'];
         }
 
@@ -1935,7 +2109,7 @@ abstract class CommonITILObject extends CommonDBTM
         return $input;
     }
 
-    public function post_updateItem($history = 1)
+    public function post_updateItem($history = true)
     {
         // Handle rich-text images and uploaded documents
         $this->input = $this->addFiles($this->input, ['force_update' => true]);
@@ -1961,6 +2135,7 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function pre_updateInDB()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
        // get again object to reload actors
@@ -2386,6 +2561,7 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function prepareInputForAdd($input)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!$this->checkFieldsConsistency($input)) {
@@ -2711,6 +2887,7 @@ abstract class CommonITILObject extends CommonDBTM
      */
     public function post_clone($source, $history)
     {
+        /** @var \DBmysql $DB */
         global $DB;
         $update = [];
         if (isset($source->fields['users_id_lastupdater'])) {
@@ -2756,6 +2933,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public static function computePriority($urgency, $impact)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (isset($CFG_GLPI[static::MATRIX_FIELD][$urgency][$impact])) {
@@ -2782,6 +2960,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public static function dropdownPriority(array $options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $p = [
@@ -2975,6 +3154,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public static function dropdownUrgency(array $options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $p = [
@@ -3098,6 +3278,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public static function dropdownImpact(array $options = [])
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $p = [
@@ -3293,6 +3474,11 @@ abstract class CommonITILObject extends CommonDBTM
         return $tab;
     }
 
+    public static function getProcessStatusArray()
+    {
+        // To be overriden by class
+        return [];
+    }
 
     /**
      * Get the ITIL object process status list
@@ -3553,7 +3739,7 @@ abstract class CommonITILObject extends CommonDBTM
      * @param $values    String / Array with the value to display
      * @param $options   Array          of option
      *
-     * @return a string
+     * @return string
      **/
     public static function getSpecificValueToDisplay($field, $values, array $options = [])
     {
@@ -3634,6 +3820,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public static function showMassiveActionsSubForm(MassiveAction $ma)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         switch ($ma->getAction()) {
@@ -3641,6 +3828,7 @@ abstract class CommonITILObject extends CommonDBTM
                 $itemtype = $ma->getItemtype(true);
                 $tasktype = $itemtype . 'Task';
                 if ($ttype = getItemForItemtype($tasktype)) {
+                    /** @var CommonITILTask $ttype */
                     $ttype->showMassiveActionAddTaskForm();
                     return true;
                 }
@@ -3686,7 +3874,7 @@ abstract class CommonITILObject extends CommonDBTM
         CommonDBTM $item,
         array $ids
     ) {
-
+        /** @var CommonITILObject $item */
         switch ($ma->getAction()) {
             case 'add_actor':
                 $input = $ma->getInput();
@@ -3760,7 +3948,13 @@ abstract class CommonITILObject extends CommonDBTM
                             'state'             => $input['state'],
                             'content'           => $input['content']
                         ];
-                        if ($task->can(-1, CREATE, $input2) && !in_array($item->fields['status'], array_merge($item->getSolvedStatusArray(), $item->getClosedStatusArray()))) {
+                        if (
+                            $task->can(-1, CREATE, $input2)
+                            && !in_array(
+                                $item->fields['status'],
+                                array_merge($item->getSolvedStatusArray(), $item->getClosedStatusArray())
+                            )
+                        ) {
                             if ($task->add($input2)) {
                                 $ma->itemDone($item->getType(), $id, MassiveAction::ACTION_OK);
                             } else {
@@ -3787,6 +3981,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getSearchOptionsMain()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $tab = [];
@@ -3804,7 +3999,7 @@ abstract class CommonITILObject extends CommonDBTM
             'datatype'           => 'itemlink',
             'searchtype'         => 'contains',
             'massiveaction'      => false,
-            'additionalfields'   => ['id', 'content', 'status']
+            'additionalfields'   => ['id', 'status']
         ];
 
         $tab[] = [
@@ -4062,6 +4257,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getSearchOptionsSolution()
     {
+        /** @var \DBmysql $DB */
         global $DB;
         $tab = [];
 
@@ -4431,6 +4627,7 @@ abstract class CommonITILObject extends CommonDBTM
 
     public static function generateSLAOLAComputation($type, $table = "TABLE")
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         switch ($type) {
@@ -4620,6 +4817,7 @@ abstract class CommonITILObject extends CommonDBTM
         $withsupplier = false,
         $inobject = true
     ) {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $types = ['user'  => User::getTypeName(1)];
@@ -4713,6 +4911,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function showActorAddFormOnCreate($type, array $options)
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $typename = static::getActorFieldNameType($type);
@@ -4748,7 +4947,7 @@ abstract class CommonITILObject extends CommonDBTM
             'right'  => $right,
             'rand'   => $rand,
             'width'  => "95%",
-            'entity' => $options['entities_id'] ?? $options['entity_restrict']
+            'entity' => Session::getMatchingActiveEntities($options['entities_id'] ?? $options['entity_restrict']),
         ];
 
        //only for active ldap and corresponding right
@@ -4959,6 +5158,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function updateDateMod($ID, $no_stat_computation = false, $users_id_lastupdater = 0)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         if ($this->getFromDB($ID)) {
@@ -4990,6 +5190,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function updateActionTime($ID)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $tot       = 0;
@@ -5023,7 +5224,11 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public static function getAllTypesForHelpdesk()
     {
-        global $PLUGIN_HOOKS, $CFG_GLPI;
+        /**
+         * @var array $CFG_GLPI
+         * @var array $PLUGIN_HOOKS
+         */
+        global $CFG_GLPI, $PLUGIN_HOOKS;
 
        /// TODO ticket_types -> itil_types
 
@@ -5073,7 +5278,7 @@ abstract class CommonITILObject extends CommonDBTM
      *
      * @param string $itemtype the object's type
      *
-     * @return true if ticket can be assign to this type, false if not
+     * @return boolean true if ticket can be assigned to this type, false if not
      **/
     public static function isPossibleToAssignType($itemtype)
     {
@@ -5248,6 +5453,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedAuthorBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linkclass = new $this->userlinkclass();
@@ -5329,6 +5535,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedRecipientBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $ctable = $this->getTable();
@@ -5396,6 +5603,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedGroupBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linkclass = new $this->grouplinkclass();
@@ -5469,6 +5677,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedUserTitleOrTypeBetween($date1 = '', $date2 = '', $title = true)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linkclass = new $this->userlinkclass();
@@ -5548,6 +5757,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedPriorityBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $ctable = $this->getTable();
@@ -5592,6 +5802,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedUrgencyBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $ctable = $this->getTable();
@@ -5637,6 +5848,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedImpactBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $ctable = $this->getTable();
@@ -5682,6 +5894,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedRequestTypeBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $ctable = $this->getTable();
@@ -5726,6 +5939,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedSolutionTypeBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $ctable = $this->getTable();
@@ -5778,6 +5992,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedTechBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linkclass = new $this->userlinkclass();
@@ -5853,6 +6068,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedTechTaskBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linktable = getTableForItemType($this->getType() . 'Task');
@@ -5945,6 +6161,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedSupplierBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linkclass = new $this->supplierlinkclass();
@@ -6014,6 +6231,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function getUsedAssignGroupBetween($date1 = '', $date2 = '')
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $linkclass = new $this->grouplinkclass();
@@ -6090,6 +6308,7 @@ abstract class CommonITILObject extends CommonDBTM
      */
     public static function showShort($id, $options = [])
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $p = [
@@ -6587,13 +6806,13 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function getTimelineItemtypes(): array
     {
+        /** @var array $PLUGIN_HOOKS */
         global $PLUGIN_HOOKS;
 
-        /** @var CommonITILObject $obj_type */
         $obj_type = static::getType();
         $foreign_key = static::getForeignKeyField();
 
-       //check sub-items rights
+        //check sub-items rights
         $tmp = [$foreign_key => $this->getID()];
         $fup = new ITILFollowup();
         $fup->getEmpty();
@@ -6707,6 +6926,7 @@ abstract class CommonITILObject extends CommonDBTM
      */
     public function getLegacyTimelineActionsHTML(): string
     {
+        /** @var array $PLUGIN_HOOKS */
         global $PLUGIN_HOOKS;
 
         $legacy_actions = '';
@@ -6732,8 +6952,6 @@ abstract class CommonITILObject extends CommonDBTM
      * - check_view_rights  : indicates whether current session rights should be checked for view rights
      * - hide_private_items : force hiding private items (followup/tasks), even if session allow it
      * @since 9.4.0
-     *
-     * @param bool $with_logs include logs ?
      *
      * @return mixed[] Timeline items
      */
@@ -6790,16 +7008,17 @@ abstract class CommonITILObject extends CommonDBTM
             $params['hide_private_items']
             || ($params['check_view_rights'] && !Session::haveRight("followup", ITILFollowup::SEEPRIVATE))
         ) {
-            if (Session::getLoginUserID() !== false && Session::getCurrentInterface() === "central") {
+            if (!$params['check_view_rights']) {
+                // notification case, we cannot rely on session
+                $restrict_fup = [
+                    'is_private' => 0,
+                ];
+            } else {
                 $restrict_fup = [
                     'OR' => [
                         'is_private' => 0,
                         'users_id'   => Session::getCurrentInterface() === "central" ? (int)Session::getLoginUserID() : 0,
                     ]
-                ];
-            } else {
-                $restrict_fup = [
-                    'is_private' => 0,
                 ];
             }
         }
@@ -6816,61 +7035,97 @@ abstract class CommonITILObject extends CommonDBTM
                 || ($params['check_view_rights'] && !Session::haveRight($task_obj::$rightname, CommonITILTask::SEEPRIVATE))
             )
         ) {
-            if (Session::getLoginUserID() !== false && Session::getCurrentInterface() === "central") {
+            if (!$params['check_view_rights']) {
+                // notification case, we cannot rely on session
+                $restrict_task = [
+                    'is_private' => 0,
+                ];
+            } else {
                 $restrict_task = [
                     'OR' => [
                         'is_private' => 0,
                         'users_id'   => Session::getCurrentInterface() === "central" ? (int)Session::getLoginUserID() : 0,
                     ]
                 ];
-            } else {
-                $restrict_task = [
-                    'is_private' => 0,
-                ];
             }
         }
 
-       //add followups to timeline
+        // Add followups to timeline
         $followup_obj = new ITILFollowup();
         if (!$params['check_view_rights'] || $followup_obj->canview()) {
-            $followups = $followup_obj->find(['items_id'  => $this->getID()] + $restrict_fup, ['date_creation DESC', 'id DESC']);
-            foreach ($followups as $followups_id => $followup) {
-                $followup_obj->getFromDB($followups_id);
-                if (!$params['check_view_rights'] || $followup_obj->canViewItem()) {
-                    $followup['can_edit'] = $followup_obj->canUpdateItem();
-                    $followup['can_promote'] = Session::getCurrentInterface() === 'central' && $this instanceof Ticket && Ticket::canCreate();
+            $followups = $followup_obj->find(
+                ['items_id'  => $this->getID()] + $restrict_fup,
+                ['date_creation DESC', 'id DESC']
+            );
+
+            foreach ($followups as $followups_id => $followup_row) {
+                // Safer to use a clean object to load our data
+                $followup = new ITILFollowup();
+                $followup->setParentItem($this);
+                $followup->fields = $followup_row;
+                $followup->post_getFromDB();
+
+                if (!$params['check_view_rights'] || $followup->canViewItem()) {
+                    $followup_row['can_edit'] = $followup->canUpdateItem();
+                    $followup_row['can_promote'] =
+                        Session::getCurrentInterface() === 'central'
+                        && $this instanceof Ticket
+                        && Ticket::canCreate()
+                    ;
                     $timeline["ITILFollowup_" . $followups_id] = [
-                        'type' => ITILFollowup::class,
-                        'item' => $followup,
+                        'type'     => ITILFollowup::class,
+                        'item'     => $followup_row,
+                        'object'   => $followup,
                         'itiltype' => 'Followup'
                     ];
                 }
             }
         }
 
-       //add tasks to timeline
+        // Add tasks to timeline
         if (!$params['check_view_rights'] || $task_obj->canview()) {
-            $tasks = $task_obj->find([$foreignKey => $this->getID()] + $restrict_task, 'date_creation DESC');
-            foreach ($tasks as $tasks_id => $task) {
-                $task_obj->getFromDB($tasks_id);
-                if (!$params['check_view_rights'] || $task_obj->canViewItem()) {
-                    $task['can_edit'] = $task_obj->canUpdateItem();
-                    $task['can_promote'] = Session::getCurrentInterface() === 'central' && $this instanceof Ticket && Ticket::canCreate();
-                    $timeline[$task_obj::getType() . "_" . $tasks_id] = [
-                        'type' => $taskClass,
-                        'item' => $task,
+            $tasks = $task_obj->find(
+                [$foreignKey => $this->getID()] + $restrict_task,
+                'date_creation DESC'
+            );
+
+            foreach ($tasks as $tasks_id => $task_row) {
+                // Safer to use a clean object to load our data
+                $task = new $taskClass();
+                $task->fields = $task_row;
+                $task->post_getFromDB();
+
+                if (!$params['check_view_rights'] || $task->canViewItem()) {
+                    $task_row['can_edit'] = $task->canUpdateItem();
+                    $task_row['can_promote'] =
+                        Session::getCurrentInterface() === 'central'
+                        && $this instanceof Ticket
+                        && Ticket::canCreate()
+                    ;
+                    $timeline[$task::getType() . "_" . $tasks_id] = [
+                        'type'     => $taskClass,
+                        'item'     => $task_row,
+                        'object'   => $task,
                         'itiltype' => 'Task'
                     ];
                 }
             }
         }
 
+        // Add solutions to timeline
         $solution_obj   = new ITILSolution();
         $solution_items = $solution_obj->find([
             'itemtype'  => static::getType(),
             'items_id'  => $this->getID()
         ]);
+
         foreach ($solution_items as $solution_item) {
+            // Safer to use a clean object to load our data
+            $solution = new ITILSolution();
+            $solution->setParentItem($this);
+            $solution->fields = $solution_item;
+            $solution->post_getFromDB();
+
             $timeline["ITILSolution_" . $solution_item['id'] ] = [
                 'type'     => ITILSolution::class,
                 'itiltype' => 'Solution',
@@ -6888,70 +7143,82 @@ abstract class CommonITILObject extends CommonDBTM
                     'users_id_approval'  => $solution_item['users_id_approval'],
                     'date_approval'      => $solution_item['date_approval'],
                     'status'             => $solution_item['status']
-                ]
+                ],
+                'object' => $solution,
             ];
         }
 
+        // Add validation to timeline
         $validation_class = $objType . "Validation";
         if (
             class_exists($validation_class) && $params['with_validations']
             && (!$params['check_view_rights'] || $validation_class::canView())
         ) {
-            $valitation_obj   = new $validation_class();
-            $validations = $valitation_obj->find([$foreignKey => $this->getID()]);
-            foreach ($validations as $validations_id => $validation) {
+            $valitation_obj = new $validation_class();
+            $validations = $valitation_obj->find([
+                $foreignKey => $this->getID()
+            ]);
+
+            foreach ($validations as $validations_id => $validation_row) {
+                // Safer to use a clean object to load our data
+                $validation = new $validation_class();
+                $validation->fields = $validation_row;
+                $validation->post_getFromDB();
+
                 $canedit = $valitation_obj->can($validations_id, UPDATE);
-                $cananswer = ($validation['users_id_validate'] === Session::getLoginUserID() &&
-                $validation['status'] == CommonITILValidation::WAITING);
+                $cananswer = ($validation_row['users_id_validate'] === Session::getLoginUserID() &&
+                $validation_row['status'] == CommonITILValidation::WAITING);
                 $user = new User();
-                $user->getFromDB($validation['users_id_validate']);
+                $user->getFromDB($validation_row['users_id_validate']);
 
                 $request_key = $valitation_obj::getType() . '_' . $validations_id
-                    . (empty($validation['validation_date']) ? '' : '_request'); // If no answer, no suffix to see attached documents on request
+                    . (empty($validation_row['validation_date']) ? '' : '_request'); // If no answer, no suffix to see attached documents on request
                 $timeline[$request_key] = [
                     'type' => $validation_class,
                     'item' => [
                         'id'        => $validations_id,
-                        'date'      => $validation['submission_date'],
+                        'date'      => $validation_row['submission_date'],
                         'content'   => __('Validation request') . " <i class='ti ti-arrow-right'></i><i class='ti ti-user text-muted me-1'></i>" . $user->getlink(),
-                        'comment_submission' => $validation['comment_submission'],
-                        'users_id'  => $validation['users_id'],
+                        'comment_submission' => $validation_row['comment_submission'],
+                        'users_id'  => $validation_row['users_id'],
                         'can_edit'  => $canedit,
                         'can_answer'   => $cananswer,
-                        'users_id_validate'  => $validation['users_id_validate'],
-                        'timeline_position' => $validation['timeline_position']
+                        'users_id_validate'  => $validation_row['users_id_validate'],
+                        'timeline_position' => $validation_row['timeline_position']
                     ],
                     'itiltype' => 'Validation',
                     'class'    => 'validation-request ' .
-                    ($validation['status'] == CommonITILValidation::WAITING  ? "validation-waiting"  : "") .
-                    ($validation['status'] == CommonITILValidation::ACCEPTED ? "validation-accepted" : "") .
-                    ($validation['status'] == CommonITILValidation::REFUSED  ? "validation-refused"  : ""),
+                    ($validation_row['status'] == CommonITILValidation::WAITING  ? "validation-waiting"  : "") .
+                    ($validation_row['status'] == CommonITILValidation::ACCEPTED ? "validation-accepted" : "") .
+                    ($validation_row['status'] == CommonITILValidation::REFUSED  ? "validation-refused"  : ""),
                     'item_action' => 'validation-request',
+                    'object'      => $validation,
                 ];
 
-                if (!empty($validation['validation_date'])) {
+                if (!empty($validation_row['validation_date'])) {
                     $timeline[$valitation_obj::getType() . "_" . $validations_id] = [
                         'type' => $validation_class,
                         'item' => [
                             'id'        => $validations_id,
-                            'date'      => $validation['validation_date'],
+                            'date'      => $validation_row['validation_date'],
                             'content'   => __('Validation request answer') . " : " .
-                            _sx('status', ucfirst($validation_class::getStatus($validation['status']))),
-                            'comment_validation' => $validation['comment_validation'],
-                            'users_id'  => $validation['users_id_validate'],
-                            'status'    => "status_" . $validation['status'],
-                            'can_edit'  => $validation['users_id_validate'] === Session::getLoginUserID(),
-                            'timeline_position' => $validation['timeline_position'],
+                            _sx('status', ucfirst($validation_class::getStatus($validation_row['status']))),
+                            'comment_validation' => $validation_row['comment_validation'],
+                            'users_id'  => $validation_row['users_id_validate'],
+                            'status'    => "status_" . $validation_row['status'],
+                            'can_edit'  => $validation_row['users_id_validate'] === Session::getLoginUserID(),
+                            'timeline_position' => $validation_row['timeline_position'],
                         ],
-                        'class'    => 'validation-answer',
-                        'itiltype' => 'Validation',
+                        'class'       => 'validation-answer',
+                        'itiltype'    => 'Validation',
                         'item_action' => 'validation-answer',
+                        'object'      => $validation,
                     ];
                 }
             }
         }
 
-       //add documents to timeline
+        // Add documents to timeline
         if ($params['with_documents']) {
             $document_item_obj = new Document_Item();
             $document_obj      = new Document();
@@ -6982,9 +7249,10 @@ abstract class CommonITILObject extends CommonDBTM
                   // document associated directly to itilobject
                     $timeline["Document_" . $document_item['documents_id']] = [
                         'type' => 'Document_Item',
-                        'item' => $item
+                        'item' => $item,
+                        'object' => $document_obj,
                     ];
-                } else if (isset($timeline[$timeline_key])) {
+                } elseif (isset($timeline[$timeline_key])) {
                  // document associated to a sub item of itilobject
                     if (!isset($timeline[$timeline_key]['documents'])) {
                         $timeline[$timeline_key]['documents'] = [];
@@ -7005,6 +7273,7 @@ abstract class CommonITILObject extends CommonDBTM
             }
         }
 
+        // Add logs to timeline
         if ($params['with_logs'] && Session::getCurrentInterface() == "central") {
            //add logs to timeline
             $log_items = Log::getHistoryData($this, 0, 0, [
@@ -7014,35 +7283,44 @@ abstract class CommonITILObject extends CommonDBTM
                 ]
             ]);
 
-            foreach ($log_items as $log_item) {
-                $content = $log_item['change'];
-                if (strlen($log_item['field']) > 0) {
-                    $content = sprintf(__("%s: %s"), $log_item['field'], $content);
+            foreach ($log_items as $log_row) {
+                // Safer to use a clean object to load our data
+                $log = new Log();
+                $log->fields = $log_row;
+                $log->post_getFromDB();
+
+                $content = $log_row['change'];
+                if (strlen($log_row['field']) > 0) {
+                    $content = sprintf(__("%s: %s"), $log_row['field'], $content);
                 }
                 $content = "<i class='fas fa-history me-1' title='" . __("Log entry") . "' data-bs-toggle='tooltip'></i>" . $content;
-                $timeline["Log_" . $log_item['id'] ] = [
+                $timeline["Log_" . $log_row['id'] ] = [
                     'type'     => 'Log',
                     'class'    => 'text-muted d-none',
                     'item'     => [
-                        'id'                 => $log_item['id'],
+                        'id'                 => $log_row['id'],
                         'content'            => $content,
-                        'date'               => $log_item['date_mod'],
+                        'date'               => $log_row['date_mod'],
                         'users_id'           => 0,
                         'can_edit'           => false,
                         'timeline_position'  => self::TIMELINE_LEFT,
-                    ]
+                    ],
+                    'object' => $log,
                 ];
             }
         }
 
         Plugin::doHook(Hooks::SHOW_IN_TIMELINE, ['item' => $this, 'timeline' => &$timeline]);
 
-       //sort timeline items by date
+        //sort timeline items by date. If items have the same date, sort by id
         $reverse = $params['sort_by_date_desc'];
         usort($timeline, function ($a, $b) use ($reverse) {
             $date_a = $a['item']['date_creation'] ?? $a['item']['date'];
             $date_b = $b['item']['date_creation'] ?? $b['item']['date'];
             $diff = strtotime($date_a) - strtotime($date_b);
+            if ($diff === 0) {
+                $diff = $a['item']['id'] - $b['item']['id'];
+            }
             return $reverse ? 0 - $diff : $diff;
         });
 
@@ -7098,6 +7376,7 @@ abstract class CommonITILObject extends CommonDBTM
      */
     public function getITILActors()
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $users_table = $this->getTable() . '_users';
@@ -7186,6 +7465,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function numberOfFollowups($with_private = true)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $RESTRICT = [];
@@ -7215,6 +7495,7 @@ abstract class CommonITILObject extends CommonDBTM
      **/
     public function numberOfTasks($with_private = true)
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $table = 'glpi_' . strtolower($this->getType()) . 'tasks';
@@ -7618,6 +7899,8 @@ abstract class CommonITILObject extends CommonDBTM
     public function getAssociatedDocumentsCriteria($bypass_rights = false): array
     {
         $task_class = $this->getType() . 'Task';
+        /** @var DBMysql $DB */
+        global $DB; // Used to get subquery results - better performance
 
         $or_crits = [
          // documents associated to ITIL item directly
@@ -7638,50 +7921,59 @@ abstract class CommonITILObject extends CommonDBTM
                     'OR' => ['is_private' => 0, 'users_id' => Session::getLoginUserID()],
                 ];
             }
-            $or_crits[] = [
-                Document_Item::getTableField('itemtype') => ITILFollowup::getType(),
-                Document_Item::getTableField('items_id') => new QuerySubQuery(
-                    [
-                        'SELECT' => 'id',
-                        'FROM'   => ITILFollowup::getTable(),
-                        'WHERE'  => $fup_crits,
-                    ]
-                ),
-            ];
+            // Run the subquery separately. It's better for huge databases
+            $iterator_tmp = $DB->request([
+                'SELECT' => 'id',
+                'FROM'   => ITILFollowup::getTable(),
+                'WHERE'  => $fup_crits,
+            ]);
+            $arr_values = array_column(iterator_to_array($iterator_tmp, false), 'id');
+            if (count($arr_values) > 0) {
+                $or_crits[] = [
+                    Document_Item::getTableField('itemtype') => ITILFollowup::getType(),
+                    Document_Item::getTableField('items_id') => $arr_values,
+                ];
+            }
         }
 
        // documents associated to solutions
         if ($bypass_rights || ITILSolution::canView()) {
-            $or_crits[] = [
-                Document_Item::getTableField('itemtype') => ITILSolution::getType(),
-                Document_Item::getTableField('items_id') => new QuerySubQuery(
-                    [
-                        'SELECT' => 'id',
-                        'FROM'   => ITILSolution::getTable(),
-                        'WHERE'  => [
-                            ITILSolution::getTableField('itemtype') => $this->getType(),
-                            ITILSolution::getTableField('items_id') => $this->getID(),
-                        ],
-                    ]
-                ),
-            ];
+            // Run the subquery separately. It's better for huge databases
+            $iterator_tmp = $DB->request([
+                'SELECT' => 'id',
+                'FROM'   => ITILSolution::getTable(),
+                'WHERE'  => [
+                    ITILSolution::getTableField('itemtype') => $this->getType(),
+                    ITILSolution::getTableField('items_id') => $this->getID(),
+                ],
+            ]);
+            $arr_values = array_column(iterator_to_array($iterator_tmp, false), 'id');
+            if (count($arr_values) > 0) {
+                $or_crits[] = [
+                    Document_Item::getTableField('itemtype') => ITILSolution::getType(),
+                    Document_Item::getTableField('items_id') => $arr_values,
+                ];
+            }
         }
 
        // documents associated to ticketvalidation
         $validation_class = static::getType() . 'Validation';
         if (class_exists($validation_class) && ($bypass_rights ||  $validation_class::canView())) {
-            $or_crits[] = [
-                Document_Item::getTableField('itemtype') => $validation_class::getType(),
-                Document_Item::getTableField('items_id') => new QuerySubQuery(
-                    [
-                        'SELECT' => 'id',
-                        'FROM'   => $validation_class::getTable(),
-                        'WHERE'  => [
-                            $validation_class::getTableField($validation_class::$items_id) => $this->getID(),
-                        ],
-                    ]
-                ),
-            ];
+             // Run the subquery separately. It's better for huge databases
+            $iterator_tmp = $DB->request([
+                'SELECT' => 'id',
+                'FROM'   => $validation_class::getTable(),
+                'WHERE'  => [
+                    $validation_class::getTableField($validation_class::$items_id) => $this->getID(),
+                ],
+            ]);
+            $arr_values = array_column(iterator_to_array($iterator_tmp, false), 'id');
+            if (count($arr_values) > 0) {
+                $or_crits[] = [
+                    Document_Item::getTableField('itemtype') => $validation_class::getType(),
+                    Document_Item::getTableField('items_id') => $arr_values,
+                ];
+            }
         }
 
        // documents associated to tasks
@@ -7694,18 +7986,20 @@ abstract class CommonITILObject extends CommonDBTM
                     'OR' => ['is_private' => 0, 'users_id' => Session::getLoginUserID()],
                 ];
             }
-            $or_crits[] = [
-                'glpi_documents_items.itemtype' => $task_class::getType(),
-                'glpi_documents_items.items_id' => new QuerySubQuery(
-                    [
-                        'SELECT' => 'id',
-                        'FROM'   => $task_class::getTable(),
-                        'WHERE'  => $tasks_crit,
-                    ]
-                ),
-            ];
+             // Run the subquery separately. It's better for huge databases
+            $iterator_tmp = $DB->request([
+                'SELECT' => 'id',
+                'FROM'   => $task_class::getTable(),
+                'WHERE'  => $tasks_crit,
+            ]);
+            $arr_values = array_column(iterator_to_array($iterator_tmp, false), 'id');
+            if (count($arr_values) > 0) {
+                $or_crits[] = [
+                    'glpi_documents_items.itemtype' => $task_class::getType(),
+                    'glpi_documents_items.items_id' => $arr_values,
+                ];
+            }
         }
-
         return ['OR' => $or_crits];
     }
 
@@ -7751,6 +8045,7 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function getLinkedItems(): array
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $assets = $DB->request([
@@ -7911,6 +8206,7 @@ abstract class CommonITILObject extends CommonDBTM
      */
     public function handleNewItemNotifications(): void
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         if (!isset($this->input['_disablenotif']) && $CFG_GLPI['use_notifications']) {
@@ -8354,11 +8650,14 @@ abstract class CommonITILObject extends CommonDBTM
                     ) {
                         // "email" actor found
                         if ($actor['alternative_email'] == $existing['alternative_email']) {
+                            // The anonymous actor matches an existing one, update it
+                            $updated[] = $actor + ['id' => $existing['id']];
                             $found = true;
                             break;
+                        } else {
+                            // Do not check for modifications on "email" actors (they should be deleted then re-added on email change)
+                            continue;
                         }
-                        // Do not check for modifications on "email" actors (they should be deleted then re-added on email change)
-                        continue;
                     }
 
                     if ($actor['itemtype'] != $existing['itemtype'] || $actor['items_id'] != $existing['items_id']) {
@@ -8443,6 +8742,9 @@ abstract class CommonITILObject extends CommonDBTM
                 }
             }
         }
+
+        // We just updated actors, clear any cached data
+        $this->clearLazyLoadedActors();
     }
 
 
@@ -8651,6 +8953,9 @@ abstract class CommonITILObject extends CommonDBTM
 
     public static function getDataToDisplayOnKanban($ID, $criteria = [])
     {
+        /**
+         * @var \DBmysql $DB
+        */
         global $DB;
 
         // List of items to return
@@ -8710,7 +9015,7 @@ abstract class CommonITILObject extends CommonDBTM
                     User::getTableField('name'),
                 ],
                 'FROM'   => $user_link_table,
-                'LEFT JOIN' => [
+                'INNER JOIN' => [
                     User::getTable() => [
                         'ON'  => [
                             $user_link_table => 'users_id',
@@ -8758,7 +9063,7 @@ abstract class CommonITILObject extends CommonDBTM
                     Group::getTableField('name'),
                 ],
                 'FROM'   => $group_link_table,
-                'LEFT JOIN' => [
+                'INNER JOIN' => [
                     Group::getTable() => [
                         'ON'  => [
                             $group_link_table => 'groups_id',
@@ -8799,7 +9104,7 @@ abstract class CommonITILObject extends CommonDBTM
                     Supplier::getTableField('name'),
                 ],
                 'FROM'   => $suplier_link_table,
-                'LEFT JOIN' => [
+                'INNER JOIN' => [
                     Supplier::getTable() => [
                         'ON'  => [
                             $suplier_link_table => 'suppliers_id',
@@ -9050,6 +9355,7 @@ abstract class CommonITILObject extends CommonDBTM
 
         $categories = [];
         if (!empty($category_ids)) {
+            /** @var \DBmysql $DB */
             global $DB;
 
             $cat_table = ITILCategory::getTable();
@@ -9084,7 +9390,10 @@ abstract class CommonITILObject extends CommonDBTM
 
         // Replace category ids with category names in items metadata
         foreach ($columns as &$column) {
-            foreach (($column['items'] ?? []) as &$item) {
+            if (!isset($column['items'])) {
+                continue;
+            }
+            foreach ($column['items'] as &$item) {
                 $item['_metadata']['category'] = $categories[$item['_metadata']['category']] ?? '';
             }
         }
@@ -9210,6 +9519,7 @@ abstract class CommonITILObject extends CommonDBTM
             $all_statuses = static::getAllStatusArray();
             foreach ($all_statuses as $status_id => $status) {
                 $columns['status'][$status_id] = [
+                    'id'           => $status_id,
                     'name'         => $status,
                     'color_class'  => 'itilstatus ' . static::getStatusKey($status_id),
                     'drop_only'    => (int) $status_id === self::CLOSED
@@ -9250,6 +9560,13 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function addTeamMember(string $itemtype, int $items_id, array $params = []): bool
     {
+        if (
+            array_key_exists('role', $params)
+            && is_string($params['role'])
+            && defined(CommonITILActor::class . '::' . strtoupper($params['role']))
+        ) {
+            $params['role'] = constant(CommonITILActor::class . '::' . strtoupper($params['role']));
+        }
         $role = $params['role'] ?? CommonITILActor::ASSIGN;
 
         /** @var CommonDBTM $link_class */
@@ -9314,6 +9631,7 @@ abstract class CommonITILObject extends CommonDBTM
 
     public function getTeam(): array
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $team = [];
@@ -9355,7 +9673,7 @@ abstract class CommonITILObject extends CommonDBTM
                 'SELECT' => $select,
                 'FROM'   => $link_class::getTable(),
                 'WHERE'  => [static::getForeignKeyField() => $this->getID()],
-                'LEFT JOIN' => [
+                'INNER JOIN' => [
                     $itemtype::getTable() => [
                         'ON'  => [
                             $itemtype::getTable()   => 'id',
@@ -9379,11 +9697,17 @@ abstract class CommonITILObject extends CommonDBTM
             }
         }
 
+        usort(
+            $team,
+            fn (array $member_1, array $member_2) => strcasecmp($member_1['display_name'], $member_2['display_name'])
+        );
+
         return $team;
     }
 
     public function getTimelineStats(): array
     {
+        /** @var \DBmysql $DB */
         global $DB;
 
         $stats = [
@@ -9593,5 +9917,55 @@ abstract class CommonITILObject extends CommonDBTM
     {
         // All actions should be attached to thread instanciated by `new` event
         return 'new';
+    }
+
+    /**
+     * Is the current user have right to update the current ITIL object ?
+     *
+     * @return boolean
+     **/
+    public function canUpdateItem()
+    {
+        if (!$this->checkEntity()) {
+            return false;
+        }
+
+        return self::canUpdate();
+    }
+
+    public function canDeleteItem()
+    {
+
+        if (!$this->checkEntity()) {
+            return false;
+        }
+        return self::canDelete();
+    }
+
+    public static function getTeamMemberForm(CommonITILObject $item): string
+    {
+        $itiltemplate = $item->getITILTemplateToUse(
+            0,
+            $item instanceof Ticket ? $item->fields['type'] : null,
+            $item->fields['itilcategories_id'],
+            $item->fields['entities_id']
+        );
+        $field_options = [
+            'full_width' => true,
+            'fields_template' => $itiltemplate,
+            'add_field_class' => 'col-sm-12',
+        ];
+        return TemplateRenderer::getInstance()->render('components/itilobject/actors/main.html.twig', [
+            'item' => $item,
+            'entities_id' => 0,
+            'canupdate' => true,
+            'canassign' => true,
+            'params' => $item->fields + ['load_actors' => false],
+            'itiltemplate' => $itiltemplate,
+            'canassigntome' => false,
+            'field_options' => $field_options,
+            'allow_auto_submit' => false,
+            'main_rand' => mt_rand(),
+        ]);
     }
 }

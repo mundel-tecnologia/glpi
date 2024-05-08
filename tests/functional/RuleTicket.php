@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -39,16 +39,24 @@ use CommonITILValidation;
 use Contract;
 use ContractType;
 use DbTestCase;
+use Entity;
 use Glpi\Toolbox\Sanitizer;
 use Group_User;
+use ITILCategory;
 use ITILFollowup;
 use ITILFollowupTemplate;
+use Location;
+use Rule;
 use RuleAction;
+use RuleBuilder;
 use RuleCriteria;
 use TaskTemplate;
+use Ticket;
 use Ticket_Contract;
+use Ticket_User;
 use TicketTask;
 use Toolbox;
+use User;
 
 /* Test for inc/ruleticket.class.php */
 
@@ -3323,5 +3331,200 @@ class RuleTicket extends DbTestCase
         $ticket = $this->createItem('Ticket', $input);
         $ticket->getFromDB($ticket->getID());
         $this->integer($ticket->fields['locations_id'])->isEqualTo($expected_location_after_creation);
+    }
+
+    /**
+     * Ensure a rule using the "global_validation" criteria work as expected on
+     * ticket updates
+     *
+     * @return void
+     */
+    public function testGlobalValidationCriteria(): void
+    {
+        $this->login(TU_USER, TU_PASS);
+
+        $entity = getItemByTypeName(Entity::class, '_test_root_entity', true);
+        $urgency_if_rule_triggered = 5;
+
+        // Test category that will be used as a secondary rule criteria
+        $category1 = $this->createItem(ITILCategory::class, [
+            'name'         => 'Test category 1',
+            'entities_id'  => $entity,
+            'is_recursive' => true,
+        ]);
+        $category2 = $this->createItem(ITILCategory::class, [
+            'name'         => 'Test category 2',
+            'entities_id'  => $entity,
+            'is_recursive' => true,
+        ]);
+
+        $builder = new RuleBuilder('Test global_validation criteria rule');
+        $builder
+            ->addCriteria('global_validation', Rule::PATTERN_IS, CommonITILValidation::WAITING)
+            ->addCriteria('itilcategories_id', Rule::PATTERN_IS, $category1->getID())
+            ->addAction('assign', 'urgency', $urgency_if_rule_triggered);
+        $this->createRule($builder);
+
+        // Create ticket with validation request
+        $ticket = $this->createItem(Ticket::class, [
+            'name'              => 'Test ticket',
+            'entities_id'       => $entity,
+            'content'           => 'Test ticket content',
+            'validatortype'     => 'user',
+            'users_id_validate' => [getItemByTypeName(User::class, 'glpi', true)],
+            '_add_validation'   => false,
+        ], ['validatortype', 'users_id_validate']);
+        $this->integer($ticket->fields['urgency'])->isNotEqualTo($urgency_if_rule_triggered);
+        $this->integer($ticket->fields['global_validation'])->isEqualTo(CommonITILValidation::WAITING);
+
+        // Change category without triggering the rule
+        $this->updateItem(Ticket::class, $ticket->getID(), [
+            'itilcategories_id' => $category2->getID()
+        ]);
+        $ticket->getFromDB($ticket->getID());
+        $this->integer($ticket->fields['urgency'])->isNotEqualTo($urgency_if_rule_triggered);
+
+        // Change category and trigger the rule
+        $this->updateItem(Ticket::class, $ticket->getID(), [
+            'itilcategories_id' => $category1->getID()
+        ]);
+        $ticket->getFromDB($ticket->getID());
+        $this->integer($ticket->fields['urgency'])->isEqualTo($urgency_if_rule_triggered);
+    }
+
+    /**
+     * Test that the "Code representing the ticket category" criterion works correctly
+     * even when the category has been modified just before.
+     *
+     * @return void
+     */
+    public function testCategoryCodeCriterionAfterCategoryModification(): void
+    {
+        // Get the root entity
+        $entity = getItemByTypeName(Entity::class, '_test_root_entity', true);
+
+        // Create a category
+        $category = $this->createItem(ITILCategory::class, [
+            'name' => 'Test category',
+            'code' => 'test_category',
+            'entities_id' => $entity,
+        ]);
+
+        // Create a location
+        $location = $this->createItem(Location::class, [
+            'name' => 'Test location',
+            'entities_id' => $entity,
+        ]);
+
+        // Create two rules
+        $builder = new RuleBuilder('Test category code criterion rule');
+        $builder
+            ->addCriteria('urgency', Rule::PATTERN_IS, 5)
+            ->addAction('assign', 'itilcategories_id', $category->getID());
+        $this->createRule($builder);
+
+        $builder
+            ->addCriteria('itilcategories_id_code', Rule::PATTERN_IS, $category->fields['code'])
+            ->addAction('assign', 'locations_id', $location->getID());
+        $this->createRule($builder);
+
+        // Create a ticket with "Very high" urgency
+        $ticket = $this->createItem(\Ticket::class, [
+            'name' => 'Test ticket',
+            'content' => 'Test ticket content',
+            'urgency' => 5, // Assuming 5 is "Very high"
+            'entities_id' => $entity,
+        ]);
+
+        // Check if the category "Test category" is assigned
+        $ticket->getFromDB($ticket->getID());
+        $this->integer($ticket->fields['itilcategories_id'])->isEqualTo($category->getID());
+
+        // Check if the location "Test location" is assigned
+        $this->integer($ticket->fields['locations_id'])->isEqualTo($location->getID());
+    }
+
+    /**
+     * Test that the "Default profile" criterion works correctly
+     * @return void
+     */
+    public function testDefaultProfileCriterion(): void
+    {
+
+        // Get the root entity
+        $entity = getItemByTypeName(Entity::class, '_test_root_entity', true);
+
+        // Create a location
+        $location = $this->createItem(Location::class, [
+            'name' => 'Test location',
+            'entities_id' => $entity,
+        ]);
+
+        // Create another location
+        $location2 = $this->createItem(Location::class, [
+            'name' => 'Other Test location',
+            'entities_id' => $entity,
+        ]);
+
+        // Create two rules
+        $builder = new RuleBuilder('Test default profile criterion rule');
+        $builder
+            ->addCriteria('profiles_id', Rule::PATTERN_IS, 4)
+            ->addAction('assign', 'locations_id', $location->getID());
+        $this->createRule($builder);
+
+
+        // Create two rules
+        $builder = new RuleBuilder('Test default profile criterion rule on update');
+        $builder
+            ->addCriteria('profiles_id', Rule::PATTERN_IS, 0)
+            ->addAction('assign', 'locations_id', $location2->getID());
+        $this->createRule($builder);
+
+        //Load user jsmith123
+        $user = new \User();
+        $user->getFromDB(getItemByTypeName('User', 'jsmith123', true));
+
+        // Create a ticket with "Very high" urgency
+        $ticket = $this->createItem(\Ticket::class, [
+            'name' => 'Test ticket',
+            'content' => 'Test ticket content',
+            'entities_id' => $entity,
+            '_users_id_requester' => $user->fields['id']
+        ]);
+
+
+        // Check if the location "Test location" is assigned
+        $this->integer($ticket->fields['locations_id'])->isEqualTo($location->getID());
+
+        $this->login('tech', 'tech');
+
+        //remove requester
+        $user_ticket = new Ticket_User();
+        $this->boolean($user_ticket->deleteByCriteria([
+            "tickets_id" => $ticket->fields['id'],
+            "type" => \CommonITILActor::REQUESTER,
+            "users_id" => $user->fields['id']
+        ]))->isTrue();
+
+        //reload ticket
+        $this->boolean($ticket->getFromDB($ticket->fields['id']))->isTrue();
+
+        //Load user tech
+        $user = new \User();
+        $user->getFromDB(getItemByTypeName('User', 'tech', true));
+
+        // update ticket to update requester
+        $this->boolean($ticket->update([
+            'name'                  => 'Test update ticket',
+            'id'                    => $ticket->fields['id'],
+            'content'               => 'test',
+            '_itil_requester'   => ["_type" => "user",
+                "users_id" => $user->fields['id']
+            ]
+        ]))->isTrue();
+
+        // Check if the location "Test location" is assigned
+        $this->integer($ticket->fields['locations_id'])->isEqualTo($location2->getID());
     }
 }

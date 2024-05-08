@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -32,6 +32,8 @@
  *
  * ---------------------------------------------------------------------
  */
+
+$SECURITY_STRATEGY = 'no_check'; // specific checks done later to allow anonymous access to embed dashboards
 
 include('../inc/includes.php');
 
@@ -207,8 +209,9 @@ switch ($_REQUEST['action']) {
             try {
                 $result[$card['card_id']] = $grid->getCardHtml($card['card_id'], array_merge($request_data, $card));
             } catch (\Throwable $e) {
-               // Send exception to logger without actually exiting.
-               // Use quiet mode to not break JSON result.
+                // Send exception to logger without actually exiting.
+                // Use quiet mode to not break JSON result.
+                /** @var \GLPI $GLPI */
                 global $GLPI;
                 $GLPI->getErrorHandler()->handleException($e, true);
             }

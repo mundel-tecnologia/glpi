@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -360,6 +360,58 @@ class NetworkPort extends DbTestCase
         // Check that there is no savedInput after update
         if (isset($_SESSION['saveInput']) && is_array($_SESSION['saveInput'])) {
             $this->array($_SESSION['saveInput'])->notHasKey('NetworkPort');
+        }
+    }
+
+    public function testShowForItem()
+    {
+        $this->login();
+
+        $computer1 = getItemByTypeName('Computer', '_test_pc01');
+        $netport = new \NetworkPort();
+
+        // Add a network port
+        $np_id = $netport->add([
+            'items_id'           => $computer1->getID(),
+            'itemtype'           => 'Computer',
+            'entities_id'        => $computer1->fields['entities_id'],
+            'is_recursive'       => 0,
+            'logical_number'     => 6,
+            'mac'                => '00:24:81:eb:c6:d6',
+            'instantiation_type' => 'NetworkPortEthernet',
+            'name'               => 'eth1',
+        ]);
+        $this->integer((int)$np_id)->isGreaterThan(0);
+
+        // Display all columns
+        $so = $netport->rawSearchOptions();
+        $displaypref = new \DisplayPreference();
+        $so_display = [];
+        foreach ($so as $column) {
+            if (isset($column['field'])) {
+                $input = [
+                    'itemtype' => 'NetworkPort',
+                    'users_id' => \Session::getLoginUserID(),
+                    'num' => $column['id'],
+                ];
+                $this->integer((int) $displaypref->add($input))->isGreaterThan(0);
+                $so_display[] = $column;
+            }
+        }
+
+        // Check that all columns are displayed and correct values
+        foreach (['showForItem', 'displayTabContentForItem'] as $method) {
+            $result = $this->output(
+                function () use ($method, $computer1) {
+                    \NetworkPort::$method($computer1);
+                }
+            );
+            foreach ($so_display as $column) {
+                $result->contains($column['name']);
+                if (isset($netport->fields[$column['field']])) {
+                    $result->contains((string)$netport->fields[$column['field']]);
+                }
+            }
         }
     }
 }

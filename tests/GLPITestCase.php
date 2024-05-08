@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -33,7 +33,6 @@
  * ---------------------------------------------------------------------
  */
 
-use atoum\atoum;
 use Glpi\Tests\Log\TestHandler;
 use Monolog\Logger;
 use Psr\Log\LogLevel;
@@ -91,12 +90,23 @@ class GLPITestCase extends atoum
 
         if (!$this->has_failed) {
             foreach ([$this->php_log_handler, $this->sql_log_handler] as $log_handler) {
-                $this->array($log_handler->getRecords())->isEmpty(
+                $this->array($log_handler->getRecords());
+                $clean_logs = array_map(
+                    static function (array $entry): array {
+                        return [
+                            'channel' => $entry['channel'],
+                            'level'   => $entry['level_name'],
+                            'message' => $entry['message'],
+                        ];
+                    },
+                    $log_handler->getRecords()
+                );
+                $this->array($clean_logs)->isEmpty(
                     sprintf(
                         "Unexpected entries in log in %s::%s:\n%s",
                         static::class,
                         $method,
-                        print_r(array_column($log_handler->getRecords(), 'message'), true)
+                        print_r($clean_logs, true)
                     )
                 );
             }
@@ -304,5 +314,17 @@ class GLPITestCase extends atoum
             return $this->int = mt_rand(1000, 10000);
         }
         return $this->int++;
+    }
+
+    /**
+     * Get the "_test_root_entity" entity created by the tests's bootstrap file
+     *
+     * @param bool $only_id
+     *
+     * @return Entity|int
+     */
+    protected function getTestRootEntity(bool $only_id = false)
+    {
+        return getItemByTypeName('Entity', '_test_root_entity', $only_id);
     }
 }

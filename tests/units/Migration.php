@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -61,9 +61,10 @@ class Migration extends \GLPITestCase
         parent::beforeTestMethod($method);
         if ($method !== 'testConstructor') {
             $this->db = new \mock\DB();
+            $this->db->disableTableCaching();
             $queries = [];
             $this->queries = &$queries;
-            $this->calling($this->db)->query = function ($query) use (&$queries) {
+            $this->calling($this->db)->doQuery = function ($query) use (&$queries) {
                 $queries[] = $query;
                 return true;
             };
@@ -242,7 +243,7 @@ class Migration extends \GLPITestCase
                '\' AND `table_type` = \'BASE TABLE\' AND `table_name` LIKE \'table2\''
         ]);
 
-       //try to backup existant tables
+        //try to backup existant tables
         $this->queries = [];
         $this->calling($this->db)->tableExists = true;
         $DB = $this->db;
@@ -252,9 +253,6 @@ class Migration extends \GLPITestCase
                 $this->migration->executeMigration();
             }
         )->message->contains('Unable to rename table glpi_existingtest (ok) to backup_glpi_existingtest (nok)!');
-       /*)->isIdenticalTo("glpi_existingtest table already exists. " .
-         "A backup have been done to backup_glpi_existingtest" .
-         "You can delete backup tables if you have no need of them.Task completed.");*/
 
         $this->array($this->queries)->isIdenticalTo([
             0 => 'DROP TABLE `backup_glpi_existingtest`',
@@ -295,11 +293,11 @@ class Migration extends \GLPITestCase
         )->isIdenticalTo("Change of the database layout - change_tableTask completed.");
 
         $this->array($this->queries)->isIdenticalTo([
-            "ALTER TABLE `change_table` DROP `id`  ,\n" .
+            "ALTER TABLE `change_table` DROP `id` ,\n" .
          "CHANGE `ID` `id` INT NOT NULL DEFAULT '0'   FIRST  ",
         ]);
 
-       // Test change field with move to after an other column
+       // Test change field with move to after another column
         $this->queries = [];
         $this->calling($this->db)->fieldExists = true;
 
@@ -312,7 +310,7 @@ class Migration extends \GLPITestCase
 
         $collate = $DB->use_utf8mb4 ? 'utf8mb4_unicode_ci' : 'utf8_unicode_ci';
         $this->array($this->queries)->isIdenticalTo([
-            "ALTER TABLE `change_table` DROP `name`  ,\n" .
+            "ALTER TABLE `change_table` DROP `name` ,\n" .
          "CHANGE `NAME` `name` VARCHAR(255) COLLATE $collate DEFAULT NULL   AFTER `id` ",
         ]);
     }
@@ -632,7 +630,7 @@ class Migration extends \GLPITestCase
         $this->calling($this->db)->fieldExists = false;
         $this->queries = [];
 
-        $this->when(
+        $this->exception(
             function () {
                 $this->migration->addField('my_table', 'my_field', 'bool', ['value' => 2]);
 
@@ -642,10 +640,8 @@ class Migration extends \GLPITestCase
                     }
                 )->isEqualTo('Change of the database layout - my_tableTask completed.');
             }
-        )->error()
-         ->withType(E_USER_ERROR)
-         ->withMessage('default_value must be 0 or 1')
-         ->exists();
+        )->isInstanceOf(\LogicException::class)
+         ->hasMessage('Default value must be 0 or 1.');
     }
 
     public function testFormatIntegerBadDefault()
@@ -655,7 +651,7 @@ class Migration extends \GLPITestCase
         $this->calling($this->db)->fieldExists = false;
         $this->queries = [];
 
-        $this->when(
+        $this->exception(
             function () {
                 $this->migration->addField('my_table', 'my_field', 'integer', ['value' => 'foo']);
 
@@ -665,10 +661,8 @@ class Migration extends \GLPITestCase
                     }
                 )->isEqualTo('Change of the database layout - my_tableTask completed.');
             }
-        )->error()
-         ->withType(E_USER_ERROR)
-         ->withMessage('default_value must be numeric')
-         ->exists();
+        )->isInstanceOf(\LogicException::class)
+         ->hasMessage('Default value must be numeric.');
     }
 
     public function testAddRight()
@@ -827,7 +821,7 @@ class Migration extends \GLPITestCase
 
         $queries = [];
         $this->queries = &$queries;
-        $this->calling($this->db)->query = function ($query) use (&$queries) {
+        $this->calling($this->db)->doQuery = function ($query) use (&$queries) {
             if ($query === 'SHOW INDEX FROM `glpi_oldtable`') {
                   // Make DbUtils::isIndex return false
                   return false;
@@ -1157,6 +1151,9 @@ class Migration extends \GLPITestCase
 
         $this->migration->changeSearchOption('Computer', 40, 100);
         $this->migration->changeSearchOption('Printer', 20, 10);
+        $this->migration->changeSearchOption('Ticket', 1, 1001);
+
+        $this->calling($this->db)->tableExists = true;
 
         $this->output(
             function () {
@@ -1168,6 +1165,10 @@ class Migration extends \GLPITestCase
             "UPDATE `glpi_displaypreferences` SET `num` = '100' WHERE `itemtype` = 'Computer' AND `num` = '40'",
             "DELETE `glpi_displaypreferences` FROM `glpi_displaypreferences` WHERE `id` IN ('12', '156', '421')",
             "UPDATE `glpi_displaypreferences` SET `num` = '10' WHERE `itemtype` = 'Printer' AND `num` = '20'",
+            "UPDATE `glpi_displaypreferences` SET `num` = '1001' WHERE `itemtype` = 'Ticket' AND `num` = '1'",
+            "UPDATE `glpi_tickettemplatehiddenfields` SET `field` = '1001' WHERE `field` = '1'",
+            "UPDATE `glpi_tickettemplatemandatoryfields` SET `field` = '1001' WHERE `field` = '1'",
+            "UPDATE `glpi_tickettemplatepredefinedfields` SET `field` = '1001' WHERE `field` = '1'",
             "UPDATE `glpi_savedsearches` SET `query` = 'is_deleted=0&as_map=0&criteria%5B0%5D%5Blink%5D=AND&criteria%5B0%5D%5Bfield%5D=100&criteria%5B0%5D%5Bsearchtype%5D=contains&criteria%5B0%5D%5Bvalue%5D=LT1&criteria%5B1%5D%5Blink%5D=AND&criteria%5B1%5D%5Bitemtype%5D=Budget&criteria%5B1%5D%5Bmeta%5D=1&criteria%5B1%5D%5Bfield%5D=4&criteria%5B1%5D%5Bsearchtype%5D=contains&criteria%5B1%5D%5Bvalue%5D=&search=Search&itemtype=Computer' WHERE `id` = '1'",
             "UPDATE `glpi_savedsearches` SET `query` = 'is_deleted=0&as_map=0&criteria%5B0%5D%5Blink%5D=AND&criteria%5B0%5D%5Bfield%5D=40&criteria%5B0%5D%5Bsearchtype%5D=contains&criteria%5B0%5D%5Bvalue%5D=LT1&criteria%5B1%5D%5Blink%5D=AND&criteria%5B1%5D%5Bitemtype%5D=Computer&criteria%5B1%5D%5Bmeta%5D=1&criteria%5B1%5D%5Bfield%5D=100&criteria%5B1%5D%5Bsearchtype%5D=contains&criteria%5B1%5D%5Bvalue%5D=&search=Search&itemtype=Computer' WHERE `id` = '2'",
         ]);

@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -100,11 +100,7 @@ class Item_OperatingSystem extends DbTestCase
         )->isIdenticalTo(1);
 
         $expected_error = "/Duplicate entry '{$computer->getID()}-Computer-{$objects['']->getID()}-{$objects['Architecture']->getID()}' for key '(glpi_items_operatingsystems\.)?unicity'/";
-        $this->output(
-            function () use ($ios, $input) {
-                $this->boolean($ios->add($input))->isFalse();
-            }
-        )->matches($expected_error);
+        $this->boolean($ios->add($input))->isFalse();
         $this->hasSqlLogRecordThatMatches($expected_error, LogLevel::ERROR);
 
         $this->integer(

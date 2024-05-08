@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -105,17 +105,11 @@ class APIRest extends APIBaseClass
            // Guzzle lib will automatically push the correct Content-type
             unset($params['headers']['Content-Type']);
         }
-        $verb = strtolower($verb);
-        if (in_array($verb, ['get', 'post', 'delete', 'put', 'options', 'patch'])) {
-            try {
-                return $this->http_client->{$verb}(
-                    $this->base_uri . $relative_uri,
-                    $params
-                );
-            } catch (\Throwable $e) {
-                throw $e;
-            }
-        }
+        return $this->http_client->request(
+            $verb,
+            $this->base_uri . $relative_uri,
+            $params
+        );
     }
 
     protected function query(
@@ -285,14 +279,19 @@ class APIRest extends APIBaseClass
      **/
     public function testInitSessionUserToken()
     {
-       // retrieve personnal token of TU_USER user
-        $user = new \User();
         $uid = getItemByTypeName('User', TU_USER, true);
-        $this->boolean((bool)$user->getFromDB($uid))->isTrue();
-        $token = isset($user->fields['api_token']) ? $user->fields['api_token'] : "";
-        if (empty($token)) {
-            $token = $user->getAuthToken('api_token');
-        }
+
+        // generate a new api token TU_USER user
+        global $DB;
+        $token = \User::getUniqueToken('api_token');
+        $updated = $DB->update(
+            'glpi_users',
+            [
+                'api_token' => $token,
+            ],
+            ['id' => $uid]
+        );
+        $this->boolean($updated)->isTrue();
 
         $res = $this->doHttpRequest(
             'GET',

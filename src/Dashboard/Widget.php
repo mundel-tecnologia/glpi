@@ -7,7 +7,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -63,6 +63,7 @@ class Widget
      */
     public static function getAllTypes(): array
     {
+        /** @var array $CFG_GLPI */
         global $CFG_GLPI;
 
         $types = [
@@ -1740,12 +1741,14 @@ JAVASCRIPT;
             return $code;
         };
 
+        $content = RichText::getSafeHtml($md->transform($p['markdown_content']));
+
         $html = <<<HTML
       <div
          class="card markdown"
          style="background-color: {$p['color']}; color: {$fg_color}; border-color: {$border_color}">
 
-         <div class="html_content">{$md->transform($p['markdown_content'])}</div>
+         <div class="html_content">{$content}</div>
          <textarea
             class="markdown_content"
             placeholder="{$ph}">{$p['markdown_content']}</textarea>
@@ -1812,7 +1815,7 @@ HTML;
         ];
 
         ob_start();
-        $params = Search::manageParams($p['itemtype'], $params);
+        $params = Search::manageParams($p['itemtype'], $params, false);
        // remove parts of search list
         $params = array_merge($params, [
             'showmassiveactions' => false,
@@ -2059,6 +2062,7 @@ JAVASCRIPT;
         string $css_dom_parent = "",
         bool $revert = true
     ) {
+        /** @var \Psr\SimpleCache\CacheInterface $GLPI_CACHE */
         global $GLPI_CACHE;
 
         $palette = self::getGradientPalette($bgcolor, $nb_series, $revert);

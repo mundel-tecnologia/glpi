@@ -5,7 +5,7 @@
  *
  * http://glpi-project.org
  *
- * @copyright 2015-2023 Teclib' and contributors.
+ * @copyright 2015-2024 Teclib' and contributors.
  * @copyright 2003-2014 by the INDEPNET Development Team.
  * @licence   https://www.gnu.org/licenses/gpl-3.0.html
  *
@@ -847,7 +847,6 @@ class GLPIDashboard {
                 var count        = $(this);
                 var precision    = count.data('precision');
                 var number       = count.children('.number');
-                var suffix       = count.children('.suffix').text();
                 var targetNumber = number.text();
 
                 // Some custom formats may contain text in the number field, no animation in this case
@@ -859,10 +858,10 @@ class GLPIDashboard {
                     duration: 800,
                     easing: 'swing',
                     step: function () {
-                        number.text(this.Counter.toFixed(precision) + suffix);
+                        number.text(this.Counter.toFixed(precision));
                     },
                     complete: function () {
-                        number.text(targetNumber + suffix);
+                        number.text(targetNumber);
                     }
                 });
             });
@@ -877,7 +876,9 @@ class GLPIDashboard {
         this.grid.setStatic(!activate);
 
         // set filters as sortable (draggable) or not
-        sortable(this.filters_selector, activate ? 'enable' : 'disable');
+        if ($(this.filters_selector).children().length > 0) {
+            sortable(this.filters_selector, activate ? 'enable' : 'disable');
+        }
 
         if (!this.edit_mode) {
             // save markdown textareas set as dirty
@@ -1251,7 +1252,7 @@ class GLPIDashboard {
                 filters = JSON.parse('{}');
             }
         });
-        return filters;
+        return filters || {};
     }
 
     /**
