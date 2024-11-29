@@ -43,6 +43,7 @@ class Hooks
    // File hooks
     const ADD_CSS        = 'add_css';
     const ADD_JAVASCRIPT = 'add_javascript';
+    const ADD_HEADER_TAG = 'add_header_tag';
 
    // Function hooks with no parameters
     const CHANGE_ENTITY               = 'change_entity';
@@ -59,6 +60,7 @@ class Hooks
     const VCARD_DATA            = 'vcard_data';
     const POST_PLUGIN_DISABLE   = 'post_plugin_disable';
     const POST_PLUGIN_CLEAN     = 'post_plugin_clean';
+    const POST_PLUGIN_INSTALL   = 'post_plugin_install';
     const POST_PLUGIN_UNINSTALL = 'post_plugin_uninstall';
     const POST_PLUGIN_ENABLE    = 'post_plugin_enable' ;
 
@@ -185,6 +187,7 @@ class Hooks
             self::UNDISCLOSED_CONFIG_VALUE,
             self::UNLOCK_FIELDS,
             self::VCARD_DATA,
+            self::ADD_HEADER_TAG
         ];
     }
 

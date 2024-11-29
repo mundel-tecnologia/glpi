@@ -103,6 +103,11 @@ class Plugin extends CommonDBTM
      */
     const OPTION_AUTOINSTALL_DISABLED = 'autoinstall_disabled';
 
+    /**
+     * Plugin key validation pattern.
+     */
+    private const PLUGIN_KEY_PATTERN = '/^[a-z0-9]+$/i';
+
     public static $rightname = 'config';
 
     /**
@@ -206,6 +211,34 @@ class Plugin extends CommonDBTM
         return false;
     }
 
+    public function prepareInputForAdd($input)
+    {
+        $input = $this->prepareInput($input);
+
+        return $input;
+    }
+
+    public function prepareInputForUpdate($input)
+    {
+        $input = $this->prepareInput($input);
+
+        return $input;
+    }
+
+    private function prepareInput(array $input)
+    {
+        if ($this->isNewItem() || array_key_exists('directory', $input)) {
+            if (preg_match(self::PLUGIN_KEY_PATTERN, $input['directory'] ?? '') !== 1) {
+                Session::addMessageAfterRedirect(
+                    __s('Invalid plugin directory'),
+                    false,
+                    ERROR
+                );
+                return false;
+            }
+        }
+        return $input;
+    }
 
     /**
      * Retrieve an item from the database using its directory
@@ -382,7 +415,7 @@ class Plugin extends CommonDBTM
     {
         /**
          * @var array $CFG_GLPI
-         * @var \Laminas\I18n\Translator\TranslatorInterface $TRANSLATE
+         * @var \Laminas\I18n\Translator\Translator $TRANSLATE
          */
         global $CFG_GLPI, $TRANSLATE;
 
@@ -949,7 +982,7 @@ class Plugin extends CommonDBTM
 
                     $this->resetHookableCacheEntries($this->fields['directory']);
 
-                    self::doHook(Hooks::POST_PLUGIN_UNINSTALL, $this->fields['directory']);
+                    self::doHook(Hooks::POST_PLUGIN_INSTALL, $this->fields['directory']);
 
                     Event::log(
                         '',
@@ -1904,6 +1937,11 @@ class Plugin extends CommonDBTM
      */
     private function loadPluginSetupFile(string $plugin_key): bool
     {
+        if (preg_match(self::PLUGIN_KEY_PATTERN, $plugin_key) !== 1) {
+            // Prevent issues with illegal chars
+            return false;
+        }
+
         foreach (PLUGINS_DIRECTORIES as $base_dir) {
             if (!is_dir($base_dir)) {
                 continue;

@@ -142,6 +142,9 @@ function getTableForItemType($itemtype)
  * @param $itemtype   string   itemtype
  *
  * @return CommonDBTM|false itemtype object or false if class does not exists
+ * @template T
+ * @phpstan-param class-string<T> $itemtype
+ * @phpstan-return T|false
  **/
 function getItemForItemtype($itemtype)
 {
@@ -227,7 +230,7 @@ function countElementsInTableForMyEntities($table, $condition = [])
  *
  * @param string  $table     table name
  * @param integer $entity    the entity ID
- * @param string  $condition additional condition (default [])
+ * @param array   $condition additional condition (default [])
  * @param boolean $recursive Whether to recurse or not. If true, will be conditionned on item recursivity
  *
  * @return int nb of elements in table
@@ -416,7 +419,7 @@ function contructListFromTree($tree, $parent = 0)
 function regenerateTreeCompleteName($table)
 {
     $dbu = new DbUtils();
-    return $dbu->regenerateTreeCompleteName($table);
+    $dbu->regenerateTreeCompleteName($table);
 }
 
 
@@ -448,7 +451,7 @@ function formatUserName($ID, $login, $realname, $firstname, $link = 0, $cut = 0,
  *                      (default =0)
  *@param $disable_anon   bool  disable anonymization of username.
  *
- *@return string : username string (realname if not empty and name if realname is empty).
+ *@return string[]|string : username string (realname if not empty and name if realname is empty).
  **/
 function getUserName($ID, $link = 0, $disable_anon = false)
 {
@@ -513,7 +516,7 @@ function autoName($objectName, $field, $isTemplate, $itemtype, $entities_id = -1
 function closeDBConnections()
 {
     $dbu = new DbUtils();
-    return $dbu->closeDBConnections();
+    $dbu->closeDBConnections();
 }
 
 /**

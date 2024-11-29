@@ -721,18 +721,19 @@ class Toolbox
             finfo_close($finfo);
         }
 
-       // don't download picture files, see them inline
-        $attachment = "";
-       // if not begin 'image/'
+        $can_be_inlined = false;
         if (
-            strncmp($mime, 'image/', 6) !== 0
-            && $mime != 'application/pdf'
-            // svg vector of attack, force attachment
-            // see https://github.com/glpi-project/glpi/issues/3873
-            || $mime == 'image/svg+xml'
+            str_starts_with(strtolower($mime), 'image/')
+            && strtolower($mime) !== 'image/svg+xml'
         ) {
-            $attachment = ' attachment;';
+            // images files can be inlined
+            // except for svg (vector of attack, see https://github.com/glpi-project/glpi/issues/3873)
+            $can_be_inlined = true;
+        } elseif (strtolower($mime) === 'application/pdf') {
+            // PDF files can be inlined
+            $can_be_inlined = true;
         }
+        $attachment = $can_be_inlined === false ? ' attachment;' : '';
 
         $etag = md5_file($file);
         $lastModified = filemtime($file);
@@ -974,7 +975,17 @@ class Toolbox
     {
 
        //TRANS: list of unit (o for octet)
-        $bytes = [__('o'), __('Kio'), __('Mio'), __('Gio'), __('Tio'), __('Pio'), __('Eio'), __('Zio'), __('Yio')];
+        $bytes = [
+            _x('size', 'B'),
+            _x('size', 'KiB'),
+            _x('size', 'MiB'),
+            _x('size', 'GiB'),
+            _x('size', 'TiB'),
+            _x('size', 'PiB'),
+            _x('size', 'EiB'),
+            _x('size', 'ZiB'),
+            _x('size', 'YiB'),
+        ];
         foreach ($bytes as $val) {
             if ($size > 1024) {
                 $size = $size / 1024;
@@ -998,7 +1009,7 @@ class Toolbox
     {
 
         if (file_exists($dir)) {
-            chmod($dir, 0777);
+            chmod($dir, 0755);
 
             if (is_dir($dir)) {
                 $id_dir = opendir($dir);
@@ -2371,14 +2382,16 @@ class Toolbox
      * @since 9.1
      * @since 9.4.7 Added $database parameter
      **/
-    public static function createSchema($lang = 'en_GB', DBmysql $database = null)
+    public static function createSchema($lang = 'en_GB', ?DBmysql $database = null)
     {
         /** @var \DBmysql $DB */
         global $DB;
 
         if (null === $database) {
-           // Use configured DB if no $db is defined in parameters
-            include_once(GLPI_CONFIG_DIR . "/config_db.php");
+            // Use configured DB if no $db is defined in parameters
+            if (!class_exists('DB', false)) {
+                include(GLPI_CONFIG_DIR . "/config_db.php");
+            }
             $database = new DB();
         }
 
@@ -2799,12 +2812,20 @@ class Toolbox
                                 $height = $img_infos[1];
                             }
 
+                            // Avoids creating a link within a link, when the image is already in an <a> tag
+                            $add_link_tmp = $add_link;
+                            if ($add_link) {
+                                $pattern = '/<a[^>]*>[^<>]*?<img[^>]+' . preg_quote($image['tag'], '/') . '[^<]+>[^<>]*?<\/a>/s';
+                                if (preg_match($pattern, $content_text)) {
+                                    $add_link_tmp = false;
+                                }
+                            }
                             // replace image
                             $new_image =  Html::getImageHtmlTagForDocument(
                                 $id,
                                 $width,
                                 $height,
-                                $add_link,
+                                $add_link_tmp,
                                 $object_url_param
                             );
                             if (empty($new_image)) {
@@ -3419,6 +3440,16 @@ HTML;
     {
         $fg_color = "FFFFFF";
         if ($color !== "") {
+            if (preg_match('/rgba?\((\d+),\s*(\d+),\s*(\d+),?\s*([\d\.]+)?\)/', $color, $matches)) {
+                $rgb_color = [
+                    "R" => intval($matches[1]),
+                    "G" => intval($matches[2]),
+                    "B" => intval($matches[3])
+                ];
+                $alpha = isset($matches[4]) ? str_pad(dechex((int)round(floatval($matches[4]) * 255)), 2, '0', STR_PAD_LEFT) : '';
+                $color = Color::rgbToHex($rgb_color) . $alpha;
+            }
+
             $color = str_replace("#", "", $color);
 
            // if transparency present, get only the color part
@@ -3504,11 +3535,32 @@ HTML;
      */
     public static function isValidWebUrl($url): bool
     {
-       // Verify absence of known disallowed characters.
-       // It is still possible to have false positives, but a fireproof check would be too complex
-       // (or would require usage of a dedicated lib).
+        // Based on https://github.com/symfony/symfony/blob/7.3/src/Symfony/Component/Validator/Constraints/UrlValidator.php
+        $pattern = '~^
+            (https?)://                                 # protocol
+            (((?:[\_\.\pL\pN-]|%%[0-9A-Fa-f]{2})+:)?((?:[\_\.\pL\pN-]|%%[0-9A-Fa-f]{2})+)@)?  # basic auth
+            (
+                (?:
+                    (?:xn--[a-z0-9-]++\.)*+xn--[a-z0-9-]++            # a domain name using punycode
+                        |
+                    (?:[\pL\pN\pS\pM\-\_]++\.)+[\pL\pN\pM]++          # a multi-level domain name
+                        |
+                    [a-z0-9\-\_]++                                    # a single-level domain name
+                )\.?
+                    |                                                 # or
+                \d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}                    # an IP address
+                    |                                                 # or
+                \[
+                    (?:(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){6})(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:::(?:(?:(?:[0-9a-f]{1,4})):){5})(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:[0-9a-f]{1,4})))?::(?:(?:(?:[0-9a-f]{1,4})):){4})(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){0,1}(?:(?:[0-9a-f]{1,4})))?::(?:(?:(?:[0-9a-f]{1,4})):){3})(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){0,2}(?:(?:[0-9a-f]{1,4})))?::(?:(?:(?:[0-9a-f]{1,4})):){2})(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){0,3}(?:(?:[0-9a-f]{1,4})))?::(?:(?:[0-9a-f]{1,4})):)(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){0,4}(?:(?:[0-9a-f]{1,4})))?::)(?:(?:(?:(?:(?:[0-9a-f]{1,4})):(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9]))\.){3}(?:(?:25[0-5]|(?:[1-9]|1[0-9]|2[0-4])?[0-9])))))))|(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){0,5}(?:(?:[0-9a-f]{1,4})))?::)(?:(?:[0-9a-f]{1,4})))|(?:(?:(?:(?:(?:(?:[0-9a-f]{1,4})):){0,6}(?:(?:[0-9a-f]{1,4})))?::))))
+                \]  # an IPv6 address
+            )
+            (:[0-9]+)?                              # a port (optional)
+            (?:/ (?:[\pL\pN\pS\pM\-._\~!$&\'()*+,;=:@]|%%[0-9A-Fa-f]{2})* )*    # a path
+            (?:\? (?:[\pL\pN\-._\~!$&\'\[\]()*+,;=:@/?]|%%[0-9A-Fa-f]{2})* )?   # a query (optional)
+            (?:\# (?:[\pL\pN\-._\~!$&\'()*+,;=:@/?]|%%[0-9A-Fa-f]{2})* )?       # a fragment (optional)
+        $~ixuD';
         return (preg_match(
-            "/^(?:http[s]?:\/\/(?:[^\s`!(){};'\",<>«»“”‘’+]+|[^\s`!()\[\]{};:'\".,<>?«»“”‘’+]))$/iu",
+            $pattern,
             Sanitizer::unsanitize($url)
         ) === 1);
     }

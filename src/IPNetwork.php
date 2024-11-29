@@ -752,7 +752,7 @@ class IPNetwork extends CommonImplicitTreeDropdown
         }
 
         if (!empty($condition["where"])) {
-            $WHERE .= " AND " . $condition["where"];
+            $WHERE[] = new \QueryExpression($condition["where"]);
         }
 
         $iterator = $DB->request([
@@ -834,7 +834,7 @@ class IPNetwork extends CommonImplicitTreeDropdown
      * @param IPAddress|integer[] $networkNetmask  (see \ref parameterType) the netmask of the network
      * @param integer             $version         of IP : only usefull for binary array as input (default 0)
      *
-     * @return true if the network owns the IP address
+     * @return boolean true if the network owns the IP address
      **/
     public static function checkIPFromNetwork($address, $networkAddress, $networkNetmask, $version = 0)
     {
@@ -1006,7 +1006,7 @@ class IPNetwork extends CommonImplicitTreeDropdown
         $end   = [];
         for ($i = 0; $i < 4; ++$i) {
             $start[$i] = IPAddress::convertNegativeIntegerToPositiveFloat($address[$i] & $netmask[$i]);
-            $end[$i]   = IPAddress::convertNegativeIntegerToPositiveFloat($address[$i] | ~$netmask[$i]);
+            $end[$i]   = IPAddress::convertNegativeIntegerToPositiveFloat($address[$i] | ~(int)$netmask[$i]);
         }
 
         if ($excludeBroadcastAndNetwork) {
@@ -1084,8 +1084,8 @@ class IPNetwork extends CommonImplicitTreeDropdown
     public static function getHTMLTableHeader(
         $itemtype,
         HTMLTableBase $base,
-        HTMLTableSuperHeader $super = null,
-        HTMLTableHeader $father = null,
+        ?HTMLTableSuperHeader $super = null,
+        ?HTMLTableHeader $father = null,
         array $options = []
     ) {
 
@@ -1113,9 +1113,9 @@ class IPNetwork extends CommonImplicitTreeDropdown
      * @param $options   array
      **/
     public static function getHTMLTableCellsForItem(
-        HTMLTableRow $row = null,
-        CommonDBTM $item = null,
-        HTMLTableCell $father = null,
+        ?HTMLTableRow $row = null,
+        ?CommonDBTM $item = null,
+        ?HTMLTableCell $father = null,
         array $options = []
     ) {
         if (empty($item)) {

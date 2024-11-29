@@ -246,11 +246,6 @@ abstract class MainAsset extends InventoryAsset
         /** @var \DBmysql $DB */
         global $DB;
 
-        if ($this->isPartial()) {
-            unset($val->users_id);
-            return;
-        }
-
         if (property_exists($val, 'users_id')) {
             if ($val->users_id == '') {
                 unset($val->users_id);
@@ -552,6 +547,10 @@ abstract class MainAsset extends InventoryAsset
                     $input['entities_id'] = $dataEntity['entities_id'];
                 }
                 $this->entities_id = $input['entities_id'];
+                if (isset($dataEntity['is_recursive'])) {
+                    $input['is_recursive'] = $dataEntity['is_recursive'];
+                    $this->setEntityRecursive($dataEntity['is_recursive']);
+                }
 
                 // get data from rules (like locations_id, states_id, groups_id_tech, etc)
                 // we don't want virtual action (prefixed by _)
@@ -882,7 +881,9 @@ abstract class MainAsset extends InventoryAsset
             $this->item->getType() != 'NetworkEquipment'
             && $this->item->getType() != 'Printer'
         ) {
-            $this->handlePorts();
+            if (!$this->isPartial() || count($this->ports)) {
+                $this->handlePorts();
+            }
         }
 
         if (method_exists($this, 'isWirelessController') && $this->isWirelessController()) {
@@ -906,7 +907,7 @@ abstract class MainAsset extends InventoryAsset
         $input = $this->handleInput($val, $this->item);
 
         if ($this->isNew()) {
-            // ONADD were already exececuted, and we want to skip rules that are only ONUPDATE
+            // ONADD were already executed, and we want to skip rules that are only ONUPDATE
             $input['_skip_rules'] = true;
         }
 
@@ -967,6 +968,16 @@ abstract class MainAsset extends InventoryAsset
         return $this->entities_id;
     }
 
+    /**
+     * Retrieve computer entities is_recursive
+     *
+     * @return integer
+     */
+    public function getEntityRecursive()
+    {
+        return $this->is_recursive;
+    }
+
     public function handleAssets()
     {
         $key = $this->current_key;
@@ -990,6 +1001,7 @@ abstract class MainAsset extends InventoryAsset
         foreach ($assets_list as $assets) {
             foreach ($assets as $asset) {
                 $asset->setEntityID($this->getEntityID());
+                $asset->setEntityRecursive($this->getEntityRecursive());
                 $asset->setExtraData($this->assets);
                 foreach ($this->assets as $asset_type => $asset_list) {
                     if ($asset_type != '\\' . get_class($asset)) {
@@ -1006,6 +1018,7 @@ abstract class MainAsset extends InventoryAsset
         //do controllers
         foreach ($controllers as $asset) {
             $asset->setEntityID($this->getEntityID());
+            $asset->setEntityRecursive($this->getEntityRecursive());
             $asset->setExtraData($this->assets);
             $asset->setExtraData(['\\' . get_class($this) => $mainasset]);
             //do not handle ignored controllers

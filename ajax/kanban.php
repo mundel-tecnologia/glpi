@@ -107,7 +107,7 @@ if ($item !== null) {
     }
     if (in_array($action, ['delete_item'])) {
         $maybe_deleted = $item->maybeDeleted();
-        if (($maybe_deleted && !$item::canDelete()) && (!$maybe_deleted && $item::canPurge())) {
+        if (($maybe_deleted && !$item::canDelete()) || (!$maybe_deleted && $item::canPurge())) {
            // Missing rights
             http_response_code(403);
             return;
@@ -142,18 +142,36 @@ if (($_POST['action'] ?? null) === 'update') {
     ]);
 } else if (($_POST['action'] ?? null) === 'add_item') {
     $checkParams(['inputs']);
-    $item = new $itemtype();
+
+    $item = getItemForItemtype($itemtype);
+    if (!$item) {
+        http_response_code(400);
+        return;
+    }
+
     $inputs = [];
     parse_str($_UPOST['inputs'], $inputs);
+    $inputs = Sanitizer::sanitize($inputs);
 
-    $result = $item->add(Sanitizer::sanitize($inputs));
+    if (!$item->can(-1, CREATE, $inputs)) {
+        http_response_code(403);
+        return;
+    }
+
+    $result = $item->add($inputs);
     if (!$result) {
         http_response_code(400);
         return;
     }
 } else if (($_POST['action'] ?? null) === 'bulk_add_item') {
     $checkParams(['inputs']);
-    $item = new $itemtype();
+
+    $item = getItemForItemtype($itemtype);
+    if (!$item) {
+        http_response_code(400);
+        return;
+    }
+
     $inputs = [];
     parse_str($_UPOST['inputs'], $inputs);
 
@@ -163,15 +181,20 @@ if (($_POST['action'] ?? null) === 'update') {
         foreach ($bulk_item_list as $item_entry) {
             $item_entry = trim($item_entry);
             if (!empty($item_entry)) {
-                $item->add(Sanitizer::sanitize($inputs + ['name' => $item_entry, 'content' => '']));
+                $item_input = Sanitizer::sanitize($inputs + ['name' => $item_entry, 'content' => '']);
+                if ($item->can(-1, CREATE, $item_input)) {
+                    $item->add($item_input);
+                }
             }
         }
     }
 } else if (($_POST['action'] ?? null) === 'move_item') {
     $checkParams(['card', 'column', 'position', 'kanban']);
-    /** @var Kanban|CommonDBTM $kanban */
     $kanban = getItemForItemtype($_POST['kanban']['itemtype']);
-    $can_move = $kanban->canOrderKanbanCard($_POST['kanban']['items_id']);
+    $can_move = false;
+    if (method_exists($kanban, 'canOrderKanbanCard')) {
+        $can_move = $kanban->canOrderKanbanCard($_POST['kanban']['items_id']);
+    }
     if ($can_move) {
         Item_Kanban::moveCard(
             $_POST['kanban']['itemtype'],
@@ -259,7 +282,7 @@ if (($_POST['action'] ?? null) === 'update') {
     $item->getFromDB($_POST['items_id']);
    // Check if the item can be trashed and if the request isn't forcing deletion (purge)
     $maybe_deleted = $item->maybeDeleted() && !($_REQUEST['force'] ?? false);
-    if (($maybe_deleted && $item->canDeleteItem()) || (!$maybe_deleted && $item->canPurgeItem())) {
+    if (($maybe_deleted && $item->can($_POST['items_id'], DELETE)) || (!$maybe_deleted && $item->can($_POST['items_id'], PURGE))) {
         $item->delete(['id' => $_POST['items_id']], !$maybe_deleted);
     } else {
         http_response_code(403);
@@ -270,7 +293,7 @@ if (($_POST['action'] ?? null) === 'update') {
     $item->getFromDB($_POST['items_id']);
     // Check if the item can be restored
     $maybe_deleted = $item->maybeDeleted();
-    if (($maybe_deleted && $item->canDeleteItem())) {
+    if (($maybe_deleted && $item->can($_POST['items_id'], DELETE))) {
         $item->restore(['id' => $_POST['items_id']]);
     } else {
         http_response_code(403);

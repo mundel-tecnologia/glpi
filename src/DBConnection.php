@@ -305,7 +305,7 @@ class DBConnection extends CommonDBTM
     /**
      * Indicates is the DB replicate is active or not
      *
-     * @return true if active / false if not active
+     * @return boolean true if active / false if not active
      **/
     public static function isDBSlaveActive()
     {
@@ -318,7 +318,7 @@ class DBConnection extends CommonDBTM
      *
      * @param integer $choice  Host number (default NULL)
      *
-     * @return DBmysql object
+     * @return DBmysql|void object
      **/
     public static function getDBSlaveConf($choice = null)
     {
@@ -567,7 +567,7 @@ class DBConnection extends CommonDBTM
     /**
      *  Get history max date of a GLPI DB
      *
-     * @param DBMysql $DBconnection DB connection used
+     * @param DBmysql $DBconnection DB connection used
      *
      * @return int|mixed|null
      */

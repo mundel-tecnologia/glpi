@@ -99,14 +99,13 @@ class Profile_User extends CommonDBRelation
 
     public function prepareInputForAdd($input)
     {
-
        // TODO: check if the entities should not be inherited from the profile or the user
-        if (
-            !isset($input['entities_id'])
-            || ($input['entities_id'] < 0)
-        ) {
+        $valid_entity = isset($input['entities_id']) && $input['entities_id'] >= 0;
+        $valid_profile = isset($input['profiles_id']) && $input['profiles_id'] > 0;
+        $valid_user = isset($input['users_id']) && $input['users_id'] > 0;
+        if (!$valid_entity || !$valid_user || !$valid_profile) {
             Session::addMessageAfterRedirect(
-                __('No selected element or badly defined operation'),
+                __('One or more required fields are missing'),
                 false,
                 ERROR
             );
@@ -884,8 +883,8 @@ class Profile_User extends CommonDBRelation
     /**
      * Get entities for which a user have a right
      *
-     * @param $user_ID         user ID
-     * @param $only_dynamic    get only recursive rights (false by default)
+     * @param int  $user_ID      user ID
+     * @param bool $only_dynamic get only recursive rights (false by default)
      *
      * @return array of entities ID
      **/
@@ -1044,8 +1043,8 @@ class Profile_User extends CommonDBRelation
 
         if (!$withtemplate) {
             $nb = 0;
-            switch ($item->getType()) {
-                case 'Entity':
+            switch (get_class($item)) {
+                case Entity::class:
                     if (Session::haveRight('user', READ)) {
                         if ($_SESSION['glpishow_count_on_tabs']) {
                             $count = $DB->request([
@@ -1070,7 +1069,7 @@ class Profile_User extends CommonDBRelation
                     }
                     break;
 
-                case 'Profile':
+                case Profile::class:
                     if (Session::haveRight('user', READ)) {
                         if ($_SESSION['glpishow_count_on_tabs']) {
                               $nb = self::countForItem($item);
@@ -1079,7 +1078,7 @@ class Profile_User extends CommonDBRelation
                     }
                     break;
 
-                case 'User':
+                case User::class:
                     if ($_SESSION['glpishow_count_on_tabs']) {
                         $nb = self::countForItem($item);
                     }
@@ -1097,16 +1096,16 @@ class Profile_User extends CommonDBRelation
     public static function displayTabContentForItem(CommonGLPI $item, $tabnum = 1, $withtemplate = 0)
     {
 
-        switch ($item->getType()) {
-            case 'Entity':
+        switch (get_class($item)) {
+            case Entity::class:
                 self::showForEntity($item);
                 break;
 
-            case 'Profile':
+            case Profile::class:
                 self::showForProfile($item);
                 break;
 
-            case 'User':
+            case User::class:
                 self::showForUser($item);
                 break;
         }

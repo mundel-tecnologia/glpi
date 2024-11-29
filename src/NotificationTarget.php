@@ -701,14 +701,13 @@ class NotificationTarget extends CommonDBChild
 
         switch ($usertype) {
             case self::EXTERNAL_USER:
+            case self::GLPI_USER:
                 return $CFG_GLPI["url_base"] . "/index.php?redirect=$redirect";
 
-            case self::ANONYMOUS_USER:
-               // No URL
+            // case self::ANONYMOUS_USER:
+            default:
+                // No URL
                 return '';
-
-            case self::GLPI_USER:
-                return $CFG_GLPI["url_base"] . "/index.php?redirect=$redirect&noAUTO=1";
         }
     }
 
@@ -931,6 +930,16 @@ class NotificationTarget extends CommonDBChild
         return [];
     }
 
+    /**
+     * Return whether the notification content corresponding to the given event can be disclosed.
+     *
+     * @return bool
+     */
+    public function canNotificationContentBeDisclosed(string $event): bool
+    {
+        return true;
+    }
+
 
     /**
      * Return all (GLPI + plugins) notification events for the object type
@@ -969,7 +978,7 @@ class NotificationTarget extends CommonDBChild
         /** @var \DBmysql $DB */
         global $DB;
 
-        foreach ($DB->request('glpi_profiles') as $data) {
+        foreach ($DB->request(Profile::getTable()) as $data) {
             $this->addTarget(
                 $data["id"],
                 sprintf(__('%1$s: %2$s'), Profile::getTypeName(1), $data["name"]),
@@ -1347,7 +1356,7 @@ class NotificationTarget extends CommonDBChild
      * Get SQL join to restrict by profile and by config to avoid send notification
      * to a user without rights.
      *
-     * @return string
+     * @return array
      */
     public function getProfileJoinCriteria()
     {
@@ -1495,8 +1504,8 @@ class NotificationTarget extends CommonDBChild
 
         if (!$withtemplate && Notification::canView()) {
             $nb = 0;
-            switch ($item->getType()) {
-                case 'Group':
+            switch (get_class($item)) {
+                case Group::class:
                     if ($_SESSION['glpishow_count_on_tabs']) {
                         $nb = self::countForGroup($item);
                     }
@@ -1505,7 +1514,7 @@ class NotificationTarget extends CommonDBChild
                         $nb
                     );
 
-                case 'Notification':
+                case Notification::class:
                     if ($_SESSION['glpishow_count_on_tabs']) {
                         $nb = countElementsInTable(
                             $this->getTable(),
@@ -1653,9 +1662,9 @@ class NotificationTarget extends CommonDBChild
     public static function displayTabContentForItem(CommonGLPI $item, $tabnum = 1, $withtemplate = 0)
     {
 
-        if ($item->getType() == 'Group') {
+        if (get_class($item) == Group::class) {
             self::showForGroup($item);
-        } else if ($item->getType() == 'Notification') {
+        } else if (get_class($item) == Notification::class) {
             $target = self::getInstanceByType(
                 $item->getField('itemtype'),
                 $item->getField('event'),

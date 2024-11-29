@@ -40,6 +40,7 @@ use Glpi\Dashboard\Grid;
 use Glpi\Exception\PasswordTooWeakException;
 use Glpi\Plugin\Hooks;
 use Glpi\System\RequirementsManager;
+use Glpi\Toolbox\ArrayNormalizer;
 use Glpi\Toolbox\Sanitizer;
 use PHPMailer\PHPMailer\PHPMailer;
 
@@ -256,22 +257,31 @@ class Config extends CommonDBTM
 
         if (isset($input['_update_devices_in_menu'])) {
             $input['devices_in_menu'] = exportArrayToDB(
-                (isset($input['devices_in_menu']) ? $input['devices_in_menu'] : [])
+                isset($input['devices_in_menu'])
+                    ? ArrayNormalizer::normalizeValues($input['devices_in_menu'], 'strval')
+                    : []
             );
         }
 
        // lock mechanism update
         if (isset($input['lock_use_lock_item'])) {
-            $input['lock_item_list'] = exportArrayToDB((isset($input['lock_item_list'])
-                                                      ? $input['lock_item_list'] : []));
+            $input['lock_item_list'] = exportArrayToDB(
+                isset($input['lock_item_list'])
+                    ? ArrayNormalizer::normalizeValues($input['lock_item_list'], 'strval')
+                    : []
+            );
         }
 
         if (isset($input[Impact::CONF_ENABLED])) {
-            $input[Impact::CONF_ENABLED] = exportArrayToDB($input[Impact::CONF_ENABLED]);
+            $input[Impact::CONF_ENABLED] = exportArrayToDB(
+                ArrayNormalizer::normalizeValues($input[Impact::CONF_ENABLED], 'strval')
+            );
         }
 
         if (isset($input['planning_work_days'])) {
-            $input['planning_work_days'] = exportArrayToDB($input['planning_work_days']);
+            $input['planning_work_days'] = exportArrayToDB(
+                ArrayNormalizer::normalizeValues($input['planning_work_days'], 'intval')
+            );
         }
 
        // Beware : with new management system, we must update each value
@@ -314,6 +324,19 @@ class Config extends CommonDBTM
                 unset($input['lock_lockprofile_id']);
             }
         }
+
+        // Prevent some input values to be saved in DB
+        $values_to_filter = [
+            '_dbslave_status',
+            '_dbreplicate_dbhost',
+            '_dbreplicate_dbuser',
+            '_dbreplicate_dbpassword',
+            '_dbreplicate_dbdefault'
+        ];
+
+        $input = array_filter($input, function ($key) use ($values_to_filter) {
+            return !in_array($key, $values_to_filter);
+        }, ARRAY_FILTER_USE_KEY);
 
         $this->setConfigurationValues('core', $input);
 
@@ -552,7 +575,7 @@ class Config extends CommonDBTM
 
         $fields = ["contact", "user", "group", "location"];
         echo "<tr class='tab_bg_2'>";
-        echo "<td> " . __('When connecting or updating') . "</td>";
+        echo "<td> " . __('When connecting or updating the relevant field') . "</td>";
         $values = [
             __('Do not copy'),
             __('Copy'),
@@ -3782,7 +3805,17 @@ HTML;
             $newvalue = $oldvalue = '********';
         }
         $oldvalue = $name . ($context !== 'core' ? ' (' . $context . ') ' : ' ') . $oldvalue;
-        Log::constructHistory($this, ['value' => $oldvalue], ['value' => $newvalue]);
+
+        if (in_array($name, NotificationMailingSetting::getRelatedConfigKeys(), true)) {
+            // Specific case for email notification settings
+            Log::history(
+                1,
+                NotificationMailingSetting::class,
+                [1, Sanitizer::sanitize($oldvalue), Sanitizer::sanitize($newvalue)]
+            );
+        } else {
+            Log::constructHistory($this, ['value' => $oldvalue], ['value' => $newvalue]);
+        }
     }
 
     /**

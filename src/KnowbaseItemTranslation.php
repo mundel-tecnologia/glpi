@@ -86,6 +86,7 @@ class KnowbaseItemTranslation extends CommonDBChild
             $nb = 0;
             switch ($item->getType()) {
                 case __CLASS__:
+                    /** @var KnowbaseItemTranslation $item */
                     $ong[1] = $this->getTypeName(1);
                     if ($item->canUpdateItem()) {
                         $ong[3] = __('Edit');
@@ -115,6 +116,7 @@ class KnowbaseItemTranslation extends CommonDBChild
     {
 
         if ($item->getType() == __CLASS__) {
+            /** @var KnowbaseItemTranslation $item */
             switch ($tabnum) {
                 case 1:
                     $item->showFull();
@@ -368,7 +370,7 @@ class KnowbaseItemTranslation extends CommonDBChild
     /**
      * Is kb item translation functionality active
      *
-     * @return true if active, false if not
+     * @return boolean true if active, false if not
      **/
     public static function isKbTranslationActive()
     {
@@ -384,9 +386,9 @@ class KnowbaseItemTranslation extends CommonDBChild
      * It be translated if translation if globally on and item is an instance of CommonDropdown
      * or CommonTreeDropdown and if translation is enabled for this class
      *
-     * @param item the item to check
+     * @param $item the item to check
      *
-     * @return true if item can be translated, false otherwise
+     * @return boolean true if item can be translated, false otherwise
      **/
     public static function canBeTranslated(CommonGLPI $item)
     {
@@ -416,7 +418,7 @@ class KnowbaseItemTranslation extends CommonDBChild
     /**
      * Get already translated languages for item
      *
-     * @param item
+     * @param CommonDBTM $item
      *
      * @return array of already translated languages
      **/

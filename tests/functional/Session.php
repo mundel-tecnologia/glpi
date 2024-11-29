@@ -39,6 +39,41 @@ namespace tests\units;
 
 class Session extends \DbTestCase
 {
+    protected function testUniqueSessionNameProvider(): iterable
+    {
+        // Same host, different path
+        yield [
+            \Session::buildSessionName("/var/www/localhost/glpi1", 'localhost', '80'),
+            \Session::buildSessionName("/var/www/localhost/glpi2", 'localhost', '80'),
+            \Session::buildSessionName("/var/www/localhost/glpi3", 'localhost', '80'),
+            \Session::buildSessionName("/var/www/localhost/glpi4", 'localhost', '80'),
+        ];
+
+        // Same path, different full domains
+        yield [
+            \Session::buildSessionName("/var/www/glpi", 'test.localhost', '80'),
+            \Session::buildSessionName("/var/www/glpi", 'preprod.localhost', '80'),
+            \Session::buildSessionName("/var/www/glpi", 'prod.localhost', '80'),
+            \Session::buildSessionName("/var/www/glpi", 'localhost', '80'),
+        ];
+
+        // Same host and path but different ports
+        yield [
+            \Session::buildSessionName("/var/www/glpi", 'localhost', '80'),
+            \Session::buildSessionName("/var/www/glpi", 'localhost', '8000'),
+            \Session::buildSessionName("/var/www/glpi", 'localhost', '8008'),
+        ];
+    }
+
+    /**
+     * @dataProvider testUniqueSessionNameProvider
+     */
+    public function testUniqueSessionName(
+        ...$cookie_names
+    ): void {
+        // Each cookie name must be unique
+        $this->array($cookie_names)->isEqualTo(array_unique($cookie_names));
+    }
     public function testAddMessageAfterRedirect()
     {
         $err_msg = 'Something is broken. Weird.';
@@ -761,5 +796,69 @@ class Session extends \DbTestCase
          ->withType(E_USER_WARNING)
          ->withMessage('Unexpected value `null` found in `$_SESSION[\'glpiactiveentities\']`.')
          ->exists();
+    }
+
+    public function testShouldReloadActiveEntities(): void
+    {
+        $this->login('glpi', 'glpi');
+
+        $ent0 = getItemByTypeName('Entity', '_test_root_entity', true);
+        $ent1 = getItemByTypeName('Entity', '_test_child_1', true);
+        $ent2 = getItemByTypeName('Entity', '_test_child_2', true);
+
+        // Create a new entity
+        $entity_id = $this->createItem(\Entity::class, [
+            'name'        => __METHOD__,
+            'entities_id' => $ent1
+        ])->getID();
+
+        $this->boolean(\Session::changeActiveEntities($ent1, true))->isTrue();
+
+        // The entity goes out of scope -> reloaded TRUE
+        $this->updateItem(\Entity::class, $entity_id, [
+            'entities_id' => $ent0
+        ]);
+        $this->boolean(\Session::shouldReloadActiveEntities())->isTrue();
+
+        $this->boolean(\Session::changeActiveEntities($ent2, true))->isTrue();
+
+        // The entity enters the scope -> reloaded TRUE
+        $this->updateItem(\Entity::class, $entity_id, [
+            'entities_id' => $ent2
+        ]);
+        $this->boolean(\Session::shouldReloadActiveEntities())->isTrue();
+
+        $this->boolean(\Session::changeActiveEntities($ent1, true))->isTrue();
+
+        // The entity remains out of scope -> reloaded FALSE
+        $this->updateItem(\Entity::class, $entity_id, [
+            'entities_id' => $ent0
+        ]);
+        $this->boolean(\Session::shouldReloadActiveEntities())->isFalse();
+
+        $this->boolean(\Session::changeActiveEntities($ent1, false))->isTrue();
+
+        // The entity remains out of scope -> reloaded FALSE
+        $this->updateItem(\Entity::class, $entity_id, [
+            'entities_id' => $ent1
+        ]);
+        $this->boolean(\Session::shouldReloadActiveEntities())->isFalse();
+
+        // See all entities -> reloaded FALSE
+        $this->boolean(\Session::changeActiveEntities('all'))->isTrue();
+
+        $this->updateItem(\Entity::class, $entity_id, [
+            'entities_id' => $ent2
+        ]);
+
+        $this->boolean(\Session::shouldReloadActiveEntities())->isFalse();
+    }
+
+    public function testActiveEntityNameForFullStructure(): void
+    {
+        $this->login();
+        \Session::changeActiveEntities("all");
+        $this->string($_SESSION["glpiactive_entity_name"])->isEqualTo("Root entity (full structure)");
+        $this->string($_SESSION["glpiactive_entity_shortname"])->isEqualTo("Root entity (full structure)");
     }
 }
